@@ -4,6 +4,13 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- An app-server that exits on its own — an OOM kill, a stray `kill -9`, or a crash — is now
+  relaunched automatically with a short back-off (about 50 seconds across five attempts) instead
+  of staying down until someone sends `/restart`. Turns wait during the relaunch and resume on the
+  new server; `/restart` remains the fallback once the attempts are exhausted.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added

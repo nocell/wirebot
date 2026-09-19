@@ -12,7 +12,7 @@ import type { RateLimitSnapshot } from "../generated/codex/v2/RateLimitSnapshot.
 import type { RateLimitWindow } from "../generated/codex/v2/RateLimitWindow.js";
 import type { SkillMetadata } from "../generated/codex/v2/SkillMetadata.js";
 import type { SkillsListResponse } from "../generated/codex/v2/SkillsListResponse.js";
-import { KeyedSerialQueue } from "../shared/async.js";
+import { delay, KeyedSerialQueue } from "../shared/async.js";
 import { BridgeError, errorMessage } from "../shared/errors.js";
 import type { Logger } from "../shared/logger.js";
 import { type CodexConfigService, findBaseUserLayer } from "./config-service.js";
@@ -80,6 +80,13 @@ interface ReconcileOptions {
 }
 
 /**
+ * Pauses before each automatic relaunch of an app-server that exited on its own,
+ * for example after an OOM kill or a stray `kill -9`; a manual `/restart` is the
+ * fallback once these are exhausted.
+ */
+const codexRecoveryDelaysMs: readonly number[] = [1_000, 2_000, 5_000, 10_000, 30_000];
+
+/**
  * Keeps Wirebot's long-lived app-server synchronized through Codex's native
  * config, MCP, and skill protocol surface.
  */
@@ -102,6 +109,7 @@ export class CodexRuntimeService {
     configPath: null,
   };
   readonly #operations = new KeyedSerialQueue();
+  #recovery: Promise<void> | undefined;
   #unsubscribeNotification: (() => void) | undefined;
   #unsubscribeExit: (() => void) | undefined;
   #stopped = true;
@@ -132,6 +140,7 @@ export class CodexRuntimeService {
 
   public async stop(): Promise<void> {
     this.#stopped = true;
+    await this.#recovery;
     await this.serialize(async () => {});
     this.#unsubscribeNotification?.();
     this.#unsubscribeNotification = undefined;
@@ -400,6 +409,68 @@ export class CodexRuntimeService {
       lastError: exit.error.message,
       restartRequired: true,
     });
+    if (!exit.expected && !this.#stopped) this.startRecovery(exit);
+  }
+
+  /** Relaunch an app-server that died on its own so nobody has to send `/restart`. */
+  private startRecovery(exit: CodexAppServerExit): void {
+    if (this.#recovery !== undefined) return;
+    this.#logger.warn("Codex app-server exited unexpectedly; relaunching it automatically", {
+      code: exit.code,
+      signal: exit.signal,
+      attempts: codexRecoveryDelaysMs.length,
+    });
+    this.#recovery = this.recover().finally(() => {
+      this.#recovery = undefined;
+    });
+  }
+
+  private async recover(): Promise<void> {
+    for (const [index, delayMs] of codexRecoveryDelaysMs.entries()) {
+      await delay(delayMs);
+      if (this.#stopped) return;
+      const recovered = await this.serialize(() => this.tryRecover(index + 1));
+      if (recovered) return;
+    }
+    this.#logger.error(
+      "Codex app-server could not be relaunched automatically; a manual restart is required",
+      undefined,
+      { lastError: this.#status.lastError },
+    );
+  }
+
+  /** One relaunch attempt under the runtime lock; `true` ends the recovery loop. */
+  private async tryRecover(attempt: number): Promise<boolean> {
+    if (this.#stopped) return true;
+    // A manual restart or reload already brought the server back while we waited.
+    if (!this.#status.restartRequired) return true;
+    this.updateStatus({ state: "restarting", lastError: null });
+    this.#codex.pause();
+    try {
+      await this.#rpc.start();
+      this.#serverModelProvider = undefined;
+      const status = await this.reconcile({
+        hotReloadConfig: false,
+        reloadMcp: false,
+        freshServer: true,
+      });
+      if (status.restartRequired) return false;
+      this.#logger.info("Codex app-server relaunched", { attempt, state: status.state });
+      return true;
+    } catch (error) {
+      this.#logger.warn("Codex app-server relaunch attempt failed", {
+        attempt,
+        error: errorMessage(error),
+      });
+      this.updateStatus({
+        state: "degraded",
+        lastError: errorMessage(error),
+        restartRequired: true,
+      });
+      return false;
+    } finally {
+      this.#codex.resume();
+    }
   }
 
   private updateStatus(patch: Partial<CodexRuntimeStatus>): void {
