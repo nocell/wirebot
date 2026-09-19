@@ -229,6 +229,8 @@ Wirebot keeps the running Codex process synchronized using the [app-server mecha
 
 The runtime card in the Mini App shows the current outcome and offers **Apply changes** and **Restart Codex**. `/reload` and `/restart` provide the same private-chat controls. Restart is the fallback for startup-only state: Wirebot pauses new turns, lets active turns finish, restarts its child app-server with the same `CODEX_HOME`, reloads its resources, and lazily resumes persisted thread IDs. It does not restart the messaging bridges or discard authentication and conversation history.
 
+If the app-server exits on its own — for example the kernel OOM-killer or a stray `kill -9` takes it out — Wirebot relaunches it automatically, retrying five times over roughly 50 seconds while new turns wait. Only when those attempts fail does the runtime stay degraded and ask for a manual `/restart`.
+
 ## Source development
 
 Requirements: [Bun](https://bun.com) 1.4 or newer.

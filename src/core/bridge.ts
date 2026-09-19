@@ -636,10 +636,12 @@ function runtimeStatusSummary(status: CodexRuntimeStatus): {
 } {
   const degraded = status.state === "degraded" || status.restartRequired;
   const detail =
-    status.lastError ??
-    (status.restartRequired
-      ? "an app-server restart is required to apply startup-only changes"
-      : status.state);
+    status.state === "restarting" && status.restartRequired
+      ? `the app-server is being relaunched automatically${status.lastError === null ? "" : ` after: ${status.lastError}`}`
+      : (status.lastError ??
+        (status.restartRequired
+          ? "an app-server restart is required to apply startup-only changes"
+          : status.state));
   return { degraded, detail };
 }
 
