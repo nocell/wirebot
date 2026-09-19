@@ -4,6 +4,10 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1-relaunch.1] - 2026-09-19
+
+Pre-release built from a fork ahead of the next upstream release.
+
 ### Fixed
 
 - An app-server that exits on its own — an OOM kill, a stray `kill -9`, or a crash — is now
