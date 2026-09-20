@@ -4,6 +4,12 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-21
+
+### Changed
+
+- The web app now uses the Wirebot website's logo, favicon, and matching light and dark themes.
+
 ### Fixed
 
 - An app-server that exits on its own — an OOM kill, a stray `kill -9`, or a crash — is now
