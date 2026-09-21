@@ -258,6 +258,27 @@ The runtime card in the Mini App shows the current outcome and offers **Apply ch
 
 If the app-server exits on its own — for example the kernel OOM-killer or a stray `kill -9` takes it out — Wirebot relaunches it automatically, retrying five times over roughly 50 seconds while new turns wait. Only when those attempts fail does the runtime stay degraded and ask for a manual `/restart`.
 
+### Message reactions
+
+Wirebot automatically connects a private localhost MCP server using MCP 2026-07-28.
+Its `react_to_last_message(reaction)` tool targets the message the active turn is answering.
+Routing uses Codex's thread/turn metadata; no message identifiers are added to prompts.
+The default messenger context encourages Codex to react when it fits the conversation.
+Empty answers send no reply, so a reaction can stand on its own; Slack and Discord progress
+messages are deleted when there is no final text.
+Wirebot preapproves all tools from its own MCP server. Other MCP tool approvals use
+the messenger's Allow once, Allow for session (when supported), and Deny buttons.
+Queued messages cannot retarget a running turn. Scheduled runs and calls after a turn
+ends have no reaction target.
+
+Reactions add the bot's emoji on Slack and Discord, and replace its single reaction on Telegram.
+Unsupported emoji and missing permissions return a tool error without substituting another emoji.
+Standard shortcodes use the bundled Emoji Mart Unicode 15 names and aliases (for example
+`:thumbsup:`, `:heart:`, and `:thumbsup::skin-tone-4:`); Unicode emoji can also be passed directly.
+Custom reactions accept Slack workspace `:names:`, Discord server `:names:` or `<:name:id>`
+(`<a:name:id>` for animated emoji), and Telegram `:custom_emoji_123456789:` when that chat permits it.
+Slack requires `reactions:write`; Discord requires Add Reactions and Read Message History.
+
 ## Source development
 
 Requirements: [Bun](https://bun.com) 1.4 or newer.

@@ -458,7 +458,7 @@ export class ThreadSession {
       };
       if (view.origin !== "scheduled") {
         await view.stream.complete(
-          deliveryText(view.origin, turn, finalText, resolution),
+          deliveryText(turn, finalText, resolution.unavailable),
           resolution.attachments,
         );
         await dispose();
@@ -502,21 +502,17 @@ function latestReasoningSummary(reasoning: ReadonlyMap<string, string[]>): strin
 }
 
 function deliveryText(
-  origin: TurnOrigin,
   turn: Turn,
   finalText: string,
-  resolution: Readonly<{
-    attachments: readonly OutboundAttachment[];
-    unavailable: readonly string[];
-  }>,
+  unavailableAttachments: readonly string[],
 ): string {
   if (turn.status === "interrupted" && finalText.length === 0) return "Stopped.";
-  const text = unavailableAttachmentsWarning(finalText, resolution.unavailable);
+  const text = unavailableAttachmentsWarning(finalText, unavailableAttachments);
   if (text.length > 0) return text;
   if (turn.items.some((item) => item.type === "contextCompaction")) {
     return "Context compacted.";
   }
-  return origin === "user" && resolution.attachments.length === 0 ? "Done." : "";
+  return "";
 }
 
 export const silentStream: OutboundStream = {

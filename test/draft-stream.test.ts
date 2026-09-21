@@ -1,11 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { DraftReplyStream } from "../src/channels/draft-stream.js";
+import type { OutboundAttachment } from "../src/core/channel.js";
+import { deferred } from "../src/shared/async.js";
 import { Logger } from "../src/shared/logger.js";
 
 class RecordingDraftStream extends DraftReplyStream {
   public readonly posts: string[] = [];
   public readonly updates: string[] = [];
+  public readonly deletions: string[] = [];
+  public readonly attachments: OutboundAttachment[] = [];
+  public initialPost = Promise.resolve("message-1");
   public failUpdates = false;
+  public failDeletion = false;
 
   public constructor(limit = 100) {
     super(new Logger("error"), "Test", limit);
@@ -13,7 +19,7 @@ class RecordingDraftStream extends DraftReplyStream {
 
   protected async postInitial(content: string): Promise<string> {
     this.posts.push(content);
-    return "message-1";
+    return await this.initialPost;
   }
 
   protected async post(content: string): Promise<void> {
@@ -23,6 +29,15 @@ class RecordingDraftStream extends DraftReplyStream {
   protected async update(_messageId: string, content: string): Promise<void> {
     if (this.failUpdates) throw new Error("update failed");
     this.updates.push(content);
+  }
+
+  protected async remove(messageId: string): Promise<void> {
+    this.deletions.push(messageId);
+    if (this.failDeletion) throw new Error("delete failed");
+  }
+
+  protected override async finishExtras(attachments: readonly OutboundAttachment[]): Promise<void> {
+    this.attachments.push(...attachments);
   }
 
   protected renderProgress(block: string): string {
@@ -78,13 +93,46 @@ describe("DraftReplyStream", () => {
     expect(stream.posts).toEqual(["▌ Thinking…", "Finished"]);
   });
 
-  it("publishes the latest progress when a turn ends without an answer", async () => {
+  it("deletes progress when a turn ends without an answer", async () => {
     const stream = new RecordingDraftStream();
 
     await stream.start({ summary: "Thinking…", actions: [], plan: [] });
     stream.setProgress({ summary: "Waiting for input", actions: [], plan: [] });
     await stream.complete("");
+    await stream.complete("");
+    stream.setProgress({ summary: "Late progress", actions: [], plan: [] });
 
-    expect(stream.updates).toEqual(["▌ Waiting for input"]);
+    expect(stream.deletions).toEqual(["message-1"]);
+    expect(stream.updates).toEqual([]);
+    expect(stream.posts).toEqual(["▌ Thinking…"]);
+  });
+
+  it("waits for the initial post before deleting and still delivers attachments on deletion failure", async () => {
+    const stream = new RecordingDraftStream();
+    const initialPost = deferred<string>();
+    stream.initialPost = initialPost.promise;
+    stream.failDeletion = true;
+    const attachments = [{ path: "/tmp/report.pdf", filename: "report.pdf" }];
+
+    const starting = stream.start();
+    const completing = stream.complete("", attachments);
+    expect(stream.deletions).toEqual([]);
+    initialPost.resolve("late-message");
+    await Promise.all([starting, completing]);
+
+    expect(stream.deletions).toEqual(["late-message"]);
+    expect(stream.attachments).toEqual(attachments);
+    expect(stream.updates).toEqual([]);
+    expect(stream.posts).toEqual(["▌ Thinking…"]);
+  });
+
+  it("sends nothing for an empty answer without a progress message", async () => {
+    const stream = new RecordingDraftStream();
+
+    await stream.complete("");
+
+    expect(stream.deletions).toEqual([]);
+    expect(stream.updates).toEqual([]);
+    expect(stream.posts).toEqual([]);
   });
 });

@@ -9,7 +9,7 @@ import { formatThinkingBlock, splitMessageText } from "./progress.js";
 /**
  * Channel-agnostic streaming reply: one editable message that starts as
  * progress and is replaced by the final answer. Edits are throttled to one
- * per interval. Connectors supply the transport (post/update) and the
+ * per interval. Connectors supply the transport (post/update/delete) and the
  * channel-specific text rendering; all draft/lifecycle state lives here.
  */
 export abstract class DraftReplyStream implements OutboundStream {
@@ -50,6 +50,9 @@ export abstract class DraftReplyStream implements OutboundStream {
 
   /** Edit the progress message in place. */
   protected abstract update(messageId: string, content: string): Promise<void>;
+
+  /** Delete the progress message when the turn ends without text. */
+  protected abstract remove(messageId: string): Promise<void>;
 
   /** Adapt the rendered thinking block for the channel (e.g. entity escaping). */
   protected abstract renderProgress(block: string): string;
@@ -147,11 +150,17 @@ export abstract class DraftReplyStream implements OutboundStream {
     const [first, ...remaining] = chunks;
     let chunksToPost = chunks;
     if (this.#messageId !== undefined) {
-      const replacement =
-        first ?? this.renderProgress(formatThinkingBlock(this.#progress)).slice(0, this.#textLimit);
-      if (replacement !== this.#lastPublishedText) {
+      if (first === undefined) {
         try {
-          await this.update(this.#messageId, replacement);
+          await this.remove(this.#messageId);
+        } catch (error) {
+          this.logger.warn(`${this.#channelLabel} progress message could not be deleted`, {
+            error: errorMessage(error),
+          });
+        }
+      } else if (first !== this.#lastPublishedText) {
+        try {
+          await this.update(this.#messageId, first);
           chunksToPost = remaining;
         } catch (error) {
           this.logger.debug(`${this.#channelLabel} final replacement failed`, {

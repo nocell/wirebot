@@ -118,6 +118,7 @@ export class CodexAppServer {
   readonly #codexHome: string;
   readonly #clientVersion: string;
   readonly #logger: Logger;
+  readonly #wirebotMcp: Readonly<{ url: string; token: string }> | undefined;
 
   public constructor(
     binaryPath: string,
@@ -125,12 +126,14 @@ export class CodexAppServer {
     codexHome: string,
     clientVersion: string,
     logger: Logger,
+    wirebotMcp?: Readonly<{ url: string; token: string }>,
   ) {
     this.#binaryPath = binaryPath;
     this.#workspace = workspace;
     this.#codexHome = codexHome;
     this.#clientVersion = clientVersion;
     this.#logger = logger;
+    this.#wirebotMcp = wirebotMcp;
   }
 
   public async start(): Promise<InitializeResponse> {
@@ -139,10 +142,25 @@ export class CodexAppServer {
     }
     this.#stopping = false;
 
-    const appServerArgs = ["app-server", "--strict-config", "--listen", "stdio://"] as const;
+    const appServerArgs = ["app-server", "--strict-config", "--listen", "stdio://"];
+    if (this.#wirebotMcp !== undefined) {
+      appServerArgs.push(
+        "-c",
+        `mcp_servers.wirebot.url=${JSON.stringify(this.#wirebotMcp.url)}`,
+        "-c",
+        'mcp_servers.wirebot.bearer_token_env_var="WIREBOT_MCP_TOKEN"',
+        "-c",
+        "mcp_servers.wirebot.enabled=true",
+        "-c",
+        'mcp_servers.wirebot.default_tools_approval_mode="approve"',
+        "-c",
+        "features.mcp_2026_07_28=true",
+      );
+    }
     const environment = externalProcessEnvironment({
       CODEX_HOME: this.#codexHome,
       LOG_FORMAT: "json",
+      ...(this.#wirebotMcp === undefined ? {} : { WIREBOT_MCP_TOKEN: this.#wirebotMcp.token }),
     });
     const launch = await resolveCodexLaunch({
       binaryPath: this.#binaryPath,

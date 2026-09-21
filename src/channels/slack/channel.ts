@@ -22,6 +22,7 @@ import { errorMessage } from "../../shared/errors.js";
 import type { Logger } from "../../shared/logger.js";
 import { PendingChoices } from "../choices.js";
 import { decodeCommandAction } from "../command-actions.js";
+import { reactToSlackMessage } from "../reactions.js";
 import { isWorkspaceMember } from "./authorization.js";
 import { type CodexConfigAccess, SlackConfigUi, slackConfigActionPrefix } from "./config-ui.js";
 import { downloadSlackFile, SlackFileDownloadError } from "./file.js";
@@ -424,6 +425,7 @@ export class SlackChannel implements MessagingChannel {
         deliveryTarget: slackDeliveryTarget(event.channel, event.channel_type, route.replyThreadTs),
       },
       reference: slackMessageReference(event.channel, event.ts),
+      react: (reaction) => reactToSlackMessage(this.#web, event.channel, event.ts, reaction),
       // Slack threads are flat: a reply references the thread root, not the
       // message being answered. When a scheduled-run notification lives in
       // this thread, point replyTo at it so its stored context resolves.
@@ -818,6 +820,9 @@ function webMessagingApi(web: WebClient): SlackMessagingApi {
         text: options.text,
         blocks: options.blocks === undefined ? [] : [...options.blocks],
       });
+    },
+    async deleteMessage(channel, ts) {
+      await web.chat.delete({ channel, ts });
     },
     async uploadFile(options) {
       const contents = { file: options.path, filename: options.filename };

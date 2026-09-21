@@ -34,6 +34,7 @@ import { errorMessage } from "../../shared/errors.js";
 import type { Logger } from "../../shared/logger.js";
 import { PendingChoices } from "../choices.js";
 import { decodeCommandAction } from "../command-actions.js";
+import { reactToDiscordMessage } from "../reactions.js";
 import { type CodexConfigAccess, DiscordConfigUi, discordConfigActionPrefix } from "./config-ui.js";
 import {
   discordDisplayName,
@@ -254,6 +255,7 @@ export class DiscordChannel implements MessagingChannel {
         deliveryTarget: discordDeliveryTarget(replyRoute.channelId),
       },
       reference: discordMessageReference(message.channelId, message.id),
+      react: (reaction) => reactToDiscordMessage(message, reaction),
       ...(message.reference?.messageId === undefined
         ? {}
         : {
@@ -769,6 +771,10 @@ function discordMessagingApi(client: Client): DiscordMessagingApi {
         flags: MessageFlags.SuppressEmbeds,
         ...(options.components === undefined ? {} : { components: options.components }),
       });
+    },
+    deleteMessage: async (channelId, messageId) => {
+      const target = await channel(channelId);
+      await target.messages.delete(messageId);
     },
     sendTyping: async (channelId) => {
       const target = await channel(channelId);

@@ -28,7 +28,9 @@
     "codex:update": "bun src/cli/main.ts codex check --apply"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
     "@grammyjs/runner": "^2.0.3",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@slack/socket-mode": "^3.0.0",
     "@slack/web-api": "^8.0.0",

@@ -42,6 +42,7 @@ export interface DiscordUpdateOptions {
 export interface DiscordMessagingApi {
   postMessage(options: DiscordPostOptions): Promise<string>;
   updateMessage(options: DiscordUpdateOptions): Promise<void>;
+  deleteMessage(channelId: string, messageId: string): Promise<void>;
   sendTyping(channelId: string): Promise<void>;
 }
 
@@ -197,6 +198,10 @@ export class DiscordReplyStream extends DraftReplyStream {
 
   protected async update(messageId: string, content: string): Promise<void> {
     await this.#api.updateMessage({ channelId: this.#channelId, messageId, content });
+  }
+
+  protected async remove(messageId: string): Promise<void> {
+    await this.#api.deleteMessage(this.#channelId, messageId);
   }
 
   protected renderProgress(block: string): string {
