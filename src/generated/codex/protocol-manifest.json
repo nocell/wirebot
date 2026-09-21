@@ -1,5 +1,5 @@
 {
-  "codexVersion": "0.153.3",
+  "codexVersion": "0.155.1",
   "methods": {
     "clientRequests": [
       "account/login/cancel",
@@ -73,6 +73,9 @@
       "skills/list",
       "thread/approveGuardianDeniedAction",
       "thread/archive",
+      "thread/attachment/add",
+      "thread/attachment/list",
+      "thread/attachment/remove",
       "thread/compact/start",
       "thread/delete",
       "thread/fork",
@@ -169,6 +172,7 @@
       "serverRequest/resolved",
       "skills/changed",
       "thread/archived",
+      "thread/attachment/updated",
       "thread/closed",
       "thread/compacted",
       "thread/deleted",
