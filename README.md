@@ -33,7 +33,7 @@ The wizard takes about five minutes and is safe to re-run. It:
 1. Installs the latest Docker Engine if the server has none.
 2. Signs Codex in to your ChatGPT plan with the device-code flow.
 3. Walks you through connecting Telegram, Slack, or Discord, and verifies every token against the messenger's API before using it. On Telegram it learns your user ID from a message you send the bot.
-4. Optionally takes a (sub)domain for `PUBLIC_URL`, checks that it really points at the server, and offers to run [Caddy](https://caddyserver.com) next to Wirebot for automatic HTTPS when nothing serves it yet.
+4. Optionally takes a (sub)domain for `PUBLIC_URL`, checks whether it points straight at the server or through Cloudflare's proxy, and offers to run [Caddy](https://caddyserver.com) next to Wirebot when nothing serves it yet: automatic HTTPS for a direct domain, or an origin that works with every Cloudflare SSL mode for a proxied one.
 5. Writes `docker-compose.yml` and `.env` to `/opt/wirebot`, starts Wirebot, and waits for it to report healthy.
 6. Registers `wirebot-updater.service`, which keeps Wirebot current without interrupting work (see [Updates](#updates)).
 
@@ -113,7 +113,7 @@ docker compose pull && docker compose up -d
 
 State lives in the volume, so recreating the container is safe. Images are tagged `latest` and `X.Y.Z` on GHCR; pin a version tag if you prefer explicit upgrades.
 
-The [quick install](#quick-install) automates this with `wirebot-updater.service`, a small systemd service running `/opt/wirebot/updater.sh`. Every hour it pulls the images named in `docker-compose.yml`. Once a newer one has arrived, it asks `/healthz` every five minutes whether Wirebot is working — the `busy` field is true while a turn, a scheduled run, or a queued message is in flight — and recreates the containers after three idle answers in a row, so an update never cuts a running task short. Follow it with `journalctl -u wirebot-updater`; `systemctl disable --now wirebot-updater` turns it off. On a manual setup, [Watchtower](https://containrrr.dev/watchtower/) or your orchestrator can automate the pull instead.
+The [quick install](#quick-install) automates this with `wirebot-updater.service`, a small systemd service running `/opt/wirebot/updater.sh`. Every hour it pulls the images named in `docker-compose.yml`. Once a newer one has arrived, it asks `/healthz` every minute whether Wirebot is working — the `busy` field is true while a turn, a scheduled run, or a queued message is in flight — and recreates the containers after five idle answers in a row, so an update never cuts a running task short. Follow it with `journalctl -u wirebot-updater`; `systemctl disable --now wirebot-updater` turns it off. On a manual setup, [Watchtower](https://containrrr.dev/watchtower/) or your orchestrator can automate the pull instead.
 
 ### The web app URL
 

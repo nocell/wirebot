@@ -20,7 +20,7 @@ CODEX_CHATGPT_TOKEN"
 for key in $MANAGED; do eval "$key=\${$key:-}"; done
 
 AUTO=0 LOGIN=1 AUTO_UPDATE=1 CADDY='' SELF_TEST=0
-STEP=0 STEPS=7 DOMAIN='' TG_BOT='' SLACK_TEAM='' DISCORD_APP='' DISCORD_APP_ID=''
+STEP=0 STEPS=7 DOMAIN='' PROXIED=0 TG_BOT='' SLACK_TEAM='' DISCORD_APP='' DISCORD_APP_ID=''
 HTTP_CODE='' HTTP_BODY='' REPLY='' ERR='' SPIN_HINT='' SPIN_QUIET=0
 BOLD='' DIM='' RED='' GREEN='' YELLOW='' CYAN='' RESET='' FANCY=0 G_FAIL=x
 NL='
@@ -379,12 +379,12 @@ EOF
   caddy:
     image: caddy:2
     restart: unless-stopped
-    command: caddy reverse-proxy --from $DOMAIN --to wirebot:8787
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
 EOF
     printf 'volumes:\n  wirebot-data:\n'
@@ -811,50 +811,75 @@ public_health() {
   curl -fsS --connect-timeout 4 --max-time 8 "$PUBLIC_URL/healthz" 2>/dev/null | grep -q '"ok" *: *true'
 }
 
+# Behind Cloudflare's proxy the origin must answer in whatever SSL mode the
+# zone uses: plain HTTP on 80 for Flexible (a redirect to HTTPS would loop),
+# any certificate on 443 for Full, a trusted one for Full (strict). Cloudflare
+# hands /.well-known/acme-challenge/ to the origin, so Let's Encrypt works
+# through the proxy; Caddy's own CA is the fallback when it does not.
+# ponytail: the origin answers anyone, not only Cloudflare's address ranges.
+# Firewall 80/443 to those ranges if direct hits on the IP ever matter.
+write_caddyfile() {
+  if [ "$PROXIED" = 1 ]; then
+    printf 'http://%s, https://%s {\n\ttls {\n\t\tissuer acme\n\t\tissuer internal\n\t}\n\treverse_proxy wirebot:8787\n}\n' \
+      "$DOMAIN" "$DOMAIN"
+  else
+    printf '%s {\n\treverse_proxy wirebot:8787\n}\n' "$DOMAIN"
+  fi >Caddyfile
+}
+
 # Decides whether the domain can serve Wirebot, and whether Caddy should.
 # ponytail: IPv4 only. An AAAA-only domain reads as "does not resolve".
 check_domain() {
-  if public_health; then
-    ok "$PUBLIC_URL already serves Wirebot over HTTPS."
-    [ -n "$CADDY" ] || CADDY=0
-    return 0
-  fi
   my_ip=$(curl -4 -fsS --max-time 8 https://icanhazip.com 2>/dev/null ||
     curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)
   my_ip=$(strip_spaces "$my_ip")
   dns_ips=$({ getent ahostsv4 "$DOMAIN" || getent hosts "$DOMAIN" || true; } 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
-  if [ -z "$dns_ips" ]; then
-    warn "$DOMAIN does not resolve yet. Add an A record pointing at ${my_ip:-this server}."
-    [ "$AUTO" = 1 ] || confirm "Use it anyway? (HTTPS starts working once DNS does)" N || return 1
-  elif [ -n "$my_ip" ] && matches " $dns_ips" " $my_ip "; then
-    ok "$DOMAIN points straight at this server ($my_ip)."
-  elif curl -sI --max-time 8 "http://$DOMAIN/" 2>/dev/null | grep -qi '^server: *cloudflare'; then
-    info "$DOMAIN is proxied through Cloudflare, which terminates HTTPS itself."
-    say "  Route it to this server: a Cloudflare Tunnel to ${BOLD}http://localhost:8787$RESET is the"
-    say "  simplest; an origin reverse proxy to 127.0.0.1:8787 works too."
-    [ -n "$CADDY" ] || CADDY=0
-    return 0
-  else
-    warn "$DOMAIN resolves to ${dns_ips}but this server is ${my_ip:-unknown}."
-    [ "$AUTO" = 1 ] || confirm "Use it anyway? (fine behind NAT or a load balancer)" N || return 1
-  fi
+  direct=0 PROXIED=0
+  case " $dns_ips" in
+    *" ${my_ip:-none} "*) direct=1 ;;
+    *) ! curl -sI --max-time 8 "http://$DOMAIN/" 2>/dev/null | grep -qi '^server: *cloudflare' || PROXIED=1 ;;
+  esac
 
-  [ -z "$CADDY" ] || return 0
+  if public_health; then
+    ok "$PUBLIC_URL already serves Wirebot over HTTPS."
+    [ -n "$CADDY" ] || CADDY=0
+  else
+    if [ "$PROXIED" = 1 ]; then
+      info "$DOMAIN is proxied through Cloudflare."
+    elif [ "$direct" = 1 ]; then
+      ok "$DOMAIN points straight at this server ($my_ip)."
+    elif [ -z "$dns_ips" ]; then
+      warn "$DOMAIN does not resolve yet. Add an A record pointing at ${my_ip:-this server}."
+      [ "$AUTO" = 1 ] || confirm "Use it anyway? (HTTPS starts working once DNS does)" N || return 1
+    else
+      warn "$DOMAIN resolves to ${dns_ips}but this server is ${my_ip:-unknown}."
+      [ "$AUTO" = 1 ] || confirm "Use it anyway? (fine behind NAT or a load balancer)" N || return 1
+    fi
+    [ -n "$CADDY" ] || offer_caddy
+  fi
+  [ "$CADDY" != 1 ] || write_caddyfile
+}
+
+offer_caddy() {
+  CADDY=0
   if [ -n "$(port_of "$PUBLIC_URL")" ]; then
-    CADDY=0
+    return 0
   elif ports_busy; then
-    CADDY=0
     info "Ports 80/443 are already taken on this server, so Caddy is not an option."
     say "  Point your existing web server at ${BOLD}127.0.0.1:8787$RESET for $DOMAIN."
     ! command -v caddy >/dev/null 2>&1 ||
       say "  Caddyfile:  ${BOLD}$DOMAIN { reverse_proxy 127.0.0.1:8787 }$RESET"
   elif [ "$AUTO" = 1 ]; then
-    CADDY=0
-    info "HTTPS is not set up for $DOMAIN. Pass --caddy to have the installer run Caddy."
+    info "Nothing serves $DOMAIN on this server. Pass --caddy to have the installer run Caddy."
+  elif [ "$PROXIED" = 1 ]; then
+    say "Cloudflare needs a web server on this machine to forward to, and nothing listens"
+    say "on ports 80/443 yet. Caddy can run next to Wirebot as that server; it works with"
+    say "every Cloudflare SSL mode and fetches its own Let's Encrypt certificate."
+    ! confirm "Set up Caddy behind Cloudflare?" Y || CADDY=1
   else
     say "HTTPS is not working for $DOMAIN yet. Caddy can run next to Wirebot as a reverse"
     say "proxy that obtains and renews a Let's Encrypt certificate on its own."
-    if confirm "Set up Caddy for automatic HTTPS?" Y; then CADDY=1; else CADDY=0; fi
+    ! confirm "Set up Caddy for automatic HTTPS?" Y || CADDY=1
   fi
 }
 
@@ -918,7 +943,9 @@ launch() {
   esac
   [ -n "$PUBLIC_URL" ] || return 0
   if [ "$CADDY" = 1 ]; then
-    spin "Getting a certificate for $DOMAIN" wait_until 20 public_health ||
+    # A re-run may have rewritten the Caddyfile under a Caddy that is already up.
+    docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
+    spin "Getting a certificate for $DOMAIN" wait_until 30 public_health ||
       warn "$PUBLIC_URL does not answer yet. Check DNS and that ports 80 and 443 are open in your firewall."
   elif public_health; then
     ok "$PUBLIC_URL serves Wirebot."
@@ -942,8 +969,8 @@ install_updater() {
 #!/bin/sh
 # Wirebot auto-updater, installed by install.sh and run by wirebot-updater.service.
 # Every hour it pulls the images named in docker-compose.yml. Once a newer one
-# has arrived, it asks Wirebot's /healthz every five minutes whether work is in
-# flight and recreates the containers after three idle answers in a row.
+# has arrived, it asks Wirebot's /healthz every minute whether work is in
+# flight and recreates the containers after five idle answers in a row.
 set -u
 cd "$(dirname "$0")" || exit 1
 export COMPOSE_PROGRESS=quiet
@@ -965,16 +992,17 @@ busy() {
 
 while :; do
   if docker compose pull -q && update_pending; then
-    echo "A newer image is here; waiting for three idle checks in a row."
-    idle=0
-    while [ "$idle" -lt 3 ]; do
+    echo "A newer image is here; waiting for five idle checks in a row."
+    idle=0 announced=0
+    while [ "$idle" -lt 5 ]; do
       if busy; then
-        idle=0
-        echo "Wirebot is working; checking again in five minutes."
+        # Said once per busy stretch: a long task must not fill the journal.
+        [ "$announced" = 1 ] || echo "Wirebot is working; waiting for it to go quiet."
+        idle=0 announced=1
       else
-        idle=$((idle + 1))
+        idle=$((idle + 1)) announced=0
       fi
-      [ "$idle" -ge 3 ] || sleep 300
+      [ "$idle" -ge 5 ] || sleep 60
     done
     echo "Updating."
     # Only services that are running: a stack stopped on purpose stays stopped.
