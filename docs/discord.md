@@ -25,6 +25,7 @@ In **OAuth2 → URL Generator** (or the current **Installation** page), select t
 - Send Messages in Threads
 - Create Public Threads
 - Read Message History
+- Add Reactions
 
 Open the generated URL and install the app in the server. Wirebot starts a public thread for a new
 mention in a normal text channel. If it cannot create or send in that thread, it explains the

@@ -21,6 +21,7 @@ import type { DynamicToolSpec } from "../generated/codex/v2/DynamicToolSpec.js";
 import type { FileChangeRequestApprovalResponse } from "../generated/codex/v2/FileChangeRequestApprovalResponse.js";
 import type { GetAccountResponse } from "../generated/codex/v2/GetAccountResponse.js";
 import type { LoginAccountResponse } from "../generated/codex/v2/LoginAccountResponse.js";
+import type { McpServerElicitationRequestResponse } from "../generated/codex/v2/McpServerElicitationRequestResponse.js";
 import type { PermissionsRequestApprovalResponse } from "../generated/codex/v2/PermissionsRequestApprovalResponse.js";
 import type { ThreadCompactStartResponse } from "../generated/codex/v2/ThreadCompactStartResponse.js";
 import type { ThreadResumeResponse } from "../generated/codex/v2/ThreadResumeResponse.js";
@@ -49,6 +50,7 @@ import {
 } from "./thread-session.js";
 
 export interface CodexInvocationContext {
+  readonly reactToMessage?: (reaction: string) => Promise<void>;
   readonly owner?: ProviderReference;
   readonly deliveryTarget?: ProviderReference;
   readonly additionalContext?: ApplicationContext;
@@ -247,6 +249,19 @@ export class CodexService {
       throw new Error(`Dynamic tool ${tool.spec.name} is already registered`);
     }
     this.#dynamicTools.set(tool.spec.name, tool);
+  }
+
+  /** MCP metadata identifies the turn without putting message IDs in model context. */
+  public async reactToLastMessage(
+    threadId: string,
+    turnId: string,
+    reaction: string,
+  ): Promise<void> {
+    const view = this.#sessions.get(threadId)?.view(turnId);
+    if (view?.origin !== "user" || view.invocation.reactToMessage === undefined) {
+      throw new Error("There is no reactable message for this active Wirebot turn.");
+    }
+    await view.invocation.reactToMessage(reaction);
   }
 
   public tryAcquireBackground(conversationKey: string): BackgroundLeaseDecision {
@@ -942,6 +957,51 @@ export class CodexService {
         await this.#rpc.reply(request.id, response);
         break;
       }
+      case "mcpServer/elicitation/request": {
+        const { threadId, turnId, serverName, message, _meta: metadata } = request.params;
+        const response: McpServerElicitationRequestResponse = {
+          action: "decline",
+          content: null,
+          _meta: null,
+        };
+        // Only Codex tool approvals fit these buttons; forms need their own input UI.
+        if (
+          request.params.mode === "form" &&
+          Object.keys(request.params.requestedSchema.properties).length === 0 &&
+          metadata !== null &&
+          typeof metadata === "object" &&
+          !Array.isArray(metadata) &&
+          metadata.codex_approval_kind === "mcp_tool_call"
+        ) {
+          // Never attach an uncorrelated or completed request to another turn's user.
+          if (turnId !== null && this.#sessions.get(threadId)?.view(turnId) !== undefined) {
+            const choice = await this.askApproval(
+              request.id,
+              threadId,
+              turnId,
+              `MCP server: ${serverName}\n\n${message}${
+                typeof metadata.tool_description === "string"
+                  ? `\n\n${metadata.tool_description}`
+                  : ""
+              }${
+                metadata.tool_params === undefined
+                  ? ""
+                  : `\n\nArguments:\n${JSON.stringify(metadata.tool_params, null, 2)}`
+              }`,
+              Array.isArray(metadata.persist) && metadata.persist.includes("session"),
+            );
+            if (choice !== "decline") {
+              response.action = "accept";
+              response.content = {};
+              response._meta = choice === "session" ? { persist: "session" } : null;
+            }
+          }
+        } else {
+          this.#logger.warn("MCP form or URL input is not supported", { serverName });
+        }
+        await this.#rpc.reply(request.id, response);
+        break;
+      }
       case "item/tool/requestUserInput": {
         const session = this.#sessions.get(request.params.threadId);
         const responder = this.turnResponder(request.params.threadId, request.params.turnId);
@@ -1051,6 +1111,7 @@ export class CodexService {
     threadId: string,
     turnId: string,
     prompt: string,
+    allowSession = true,
   ): Promise<"once" | "session" | "decline"> {
     const session = this.#sessions.get(threadId);
     const responder = this.turnResponder(threadId, turnId);
@@ -1061,12 +1122,12 @@ export class CodexService {
         prompt,
         [
           { id: "once", label: "Allow once" },
-          { id: "session", label: "Allow for session" },
+          ...(allowSession ? [{ id: "session", label: "Allow for session" }] : []),
           { id: "decline", label: "Deny" },
         ],
         signal,
       );
-      return answer === "once" || answer === "session" ? answer : "decline";
+      return answer === "once" || (allowSession && answer === "session") ? answer : "decline";
     } finally {
       session.endServerRequest(requestId);
     }
@@ -1131,6 +1192,8 @@ function createRemoteClientContext(connector: string): ApplicationContext {
     "wirebot.remote-client": {
       kind: "application",
       value: `This Codex session is operated through Wirebot, a remote messaging bridge. The user reads and replies through ${connectorName} and is not present at the machine where Codex and its commands run.
+
+\`react_to_last_message\` (emoji or :shortcode:): Reactions are part of the conversation. Use them at your discretion when a brief nonverbal response feels appropriate. A reaction can accompany a reply or serve as the entire response. Don’t announce or explain it unless the user asks. It’s also fine not to react.
 
 Host-local UI is not visible or accessible to the user:
 - Do not open browsers, GUI applications, editors, file managers, or OAuth pages as a way of handing work to the user.

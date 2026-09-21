@@ -71,6 +71,7 @@ export interface SlackEphemeralOptions {
 export interface SlackMessagingApi {
   postMessage(options: SlackPostOptions): Promise<string>;
   updateMessage(options: SlackUpdateOptions): Promise<void>;
+  deleteMessage(channel: string, ts: string): Promise<void>;
   uploadFile(options: SlackUploadOptions): Promise<void>;
   postEphemeral(options: SlackEphemeralOptions): Promise<void>;
   fetchThreadReplies(
@@ -326,6 +327,10 @@ export class SlackReplyStream extends DraftReplyStream {
 
   protected async update(messageTs: string, content: string): Promise<void> {
     await this.#api.updateMessage({ channel: this.#channel, ts: messageTs, text: content });
+  }
+
+  protected async remove(messageTs: string): Promise<void> {
+    await this.#api.deleteMessage(this.#channel, messageTs);
   }
 
   // Escaping matters even in previews: `<command>` fragments would vanish and

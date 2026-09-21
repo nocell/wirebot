@@ -26,6 +26,7 @@ import { errorMessage } from "../../shared/errors.js";
 import type { Logger } from "../../shared/logger.js";
 import { PendingChoices } from "../choices.js";
 import { decodeCommandAction } from "../command-actions.js";
+import { reactToTelegramMessage } from "../reactions.js";
 import { downloadTelegramFile, TelegramFileDownloadError } from "./file.js";
 import {
   describeTelegramFile,
@@ -392,6 +393,8 @@ export class TelegramChannel implements MessagingChannel {
         deliveryTarget: telegramDeliveryTarget(message.chat.id, incomingRoute.reply),
       },
       reference: telegramMessageReference(message.chat.id, message.message_id),
+      react: (reaction) =>
+        reactToTelegramMessage(api, message.chat.id, message.message_id, reaction),
       ...(content.replyToMessageId === undefined
         ? {}
         : { replyTo: telegramMessageReference(message.chat.id, content.replyToMessageId) }),

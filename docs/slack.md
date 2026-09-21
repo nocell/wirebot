@@ -64,6 +64,7 @@ oauth_config:
   scopes:
     bot:
       - chat:write
+      - reactions:write
       - im:history
       - channels:history
       - groups:history
@@ -87,6 +88,8 @@ settings:
 ```
 
 ## 2. Collect the two tokens
+
+For an existing installation, add `reactions:write` and reinstall the app to enable reactions.
 
 - **App-level token** (`xapp-…`): in the app's **Basic Information** page,
   scroll to **App-Level Tokens**, click **Generate Token and Scopes**, name it

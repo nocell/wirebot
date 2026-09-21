@@ -14,6 +14,7 @@ import { CodexBridge } from "./core/bridge.js";
 import type { MessagingChannel } from "./core/channel.js";
 import { ConversationStore } from "./core/conversation-store.js";
 import { WirebotSettingsStore } from "./core/settings-store.js";
+import { WirebotMcpServer } from "./mcp/server.js";
 import { BrowserAuth } from "./miniapp/browser-auth.js";
 import { MiniAppServer } from "./miniapp/server.js";
 import { QuickTunnel } from "./miniapp/tunnel.js";
@@ -73,12 +74,24 @@ export async function runWirebot(): Promise<void> {
     );
     const binaryPath = await toolchains.ensureVersion(pinnedCodexVersion);
 
+    let codex: CodexService | undefined;
+    const mcp = new WirebotMcpServer(
+      async (threadId, turnId, reaction) => {
+        if (codex === undefined) throw new Error("Codex is not ready.");
+        await codex.reactToLastMessage(threadId, turnId, reaction);
+      },
+      logger.child({ component: "mcp" }),
+    );
+    const mcpConnection = await mcp.start();
+    resources.push(mcp);
+
     const rpc = new CodexAppServer(
       binaryPath,
       config.workspace,
       codexHome,
       wirebotVersion,
       logger.child({ component: "codex-rpc" }),
+      mcpConnection,
     );
     resources.push(rpc);
     await rpc.start();
@@ -109,7 +122,7 @@ export async function runWirebot(): Promise<void> {
       chatgptAuth === undefined ? undefined : () => Promise.resolve(chatgptAuth),
     );
     let liveRuntime: CodexRuntimeService | undefined;
-    const codex = new CodexService(
+    codex = new CodexService(
       rpc,
       conversations,
       config.workspace,

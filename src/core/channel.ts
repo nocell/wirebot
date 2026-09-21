@@ -136,6 +136,8 @@ export interface InboundMessage {
    */
   readonly isAdmin: boolean;
   readonly responder: MessageResponder;
+  /** React to this inbound message; provider credentials and IDs stay in the connector. */
+  readonly react?: (reaction: string) => Promise<void>;
   /**
    * Release provider-owned temporary resources after the message is fully
    * handled. The message handler owns this callback, including across a

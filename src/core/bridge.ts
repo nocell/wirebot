@@ -208,6 +208,7 @@ export class CodexBridge {
       message.attachments,
       {
         owner,
+        ...(message.react === undefined ? {} : { reactToMessage: message.react }),
         ...(message.address.deliveryTarget === undefined
           ? {}
           : { deliveryTarget: message.address.deliveryTarget }),

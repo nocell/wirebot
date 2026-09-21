@@ -4,6 +4,15 @@
  * skipLibCheck: false, so only what is needed is declared here.
  */
 declare const Bun: {
+  serve(options: {
+    hostname: string;
+    port: number;
+    maxRequestBodySize: number;
+    fetch(request: Request): Response | Promise<Response>;
+  }): {
+    readonly port: number;
+    stop(closeActiveConnections?: boolean): Promise<void>;
+  };
   build(config: {
     entrypoints: readonly string[];
     outdir: string;
