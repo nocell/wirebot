@@ -4,6 +4,14 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-21
+
+### Changed
+
+- Updated the bundled Codex CLI from 0.153.3 to 0.155.1 and regenerated the app-server
+  protocol bindings. Existing Wirebot integrations remain compatible; this update adds no
+  new Wirebot features.
+
 ## [0.3.2] - 2026-09-21
 
 ### Added
