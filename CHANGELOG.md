@@ -4,29 +4,19 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-21
+
 ### Added
 
 - `install.sh`, a POSIX `sh` install wizard for a fresh Linux server, runnable as a one-liner. It
-  installs Docker when missing, signs Codex in with the device-code flow, connects Telegram,
-  Slack, or Discord with every token verified against the messenger's API, optionally sets
-  `PUBLIC_URL` after checking where the domain points (offering Caddy for automatic HTTPS, or as
-  an origin behind Cloudflare's proxy), and starts Wirebot. `--yes` takes everything from flags or the environment for unattended installs.
+  installs Docker when missing, signs Codex in with the device-code flow, connects Telegram, Slack,
+  or Discord with every token verified against the messenger's API, optionally sets `PUBLIC_URL`
+  after checking where the domain points (offering Caddy for automatic HTTPS, or as an origin behind
+  Cloudflare's proxy), and starts Wirebot. `--yes` takes everything from flags or the environment
+  for unattended installs.
 - The installer registers `wirebot-updater.service`: it pulls newer images hourly and recreates
   the containers only after five idle `/healthz` checks in a row, one minute apart.
 - `/healthz` reports `busy`, true while a turn, a scheduled run, or a queued message is in flight.
-
-## [0.3.1] - 2026-09-21
-
-### Changed
-
-- The web app now uses the Wirebot website's logo, favicon, and matching light and dark themes.
-
-### Fixed
-
-- An app-server that exits on its own — an OOM kill, a stray `kill -9`, or a crash — is now
-  relaunched automatically with a short back-off (about 50 seconds across five attempts) instead
-  of staying down until someone sends `/restart`. Turns wait during the relaunch and resume on the
-  new server; `/restart` remains the fallback once the attempts are exhausted.
 
 ### Changed
 
@@ -41,6 +31,19 @@ All notable changes to Wirebot are documented in this file.
   rows with a pause switch whose delete action lives in the editor. Detail pages have
   bookmarkable URLs, and the app shows its version in the rail and on the Settings home.
 - The browser bundle now ships React's production build.
+
+## [0.3.1] - 2026-09-21
+
+### Changed
+
+- The web app now uses the Wirebot website's logo, favicon, and matching light and dark themes.
+
+### Fixed
+
+- An app-server that exits on its own — an OOM kill, a stray `kill -9`, or a crash — is now
+  relaunched automatically with a short back-off (about 50 seconds across five attempts) instead
+  of staying down until someone sends `/restart`. Turns wait during the relaunch and resume on the
+  new server; `/restart` remains the fallback once the attempts are exhausted.
 
 ## [0.3.0] - 2026-09-05
 
