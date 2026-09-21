@@ -224,6 +224,11 @@ export class CodexService {
     this.#pauseGate ??= deferred<void>();
   }
 
+  /** True while a turn, scheduled run, or queued message is in flight. */
+  public get busy(): boolean {
+    return this.#runningJobs > 0 || this.#foregroundWaiting.size > 0;
+  }
+
   public async waitForIdle(): Promise<void> {
     if (this.#runningJobs === 0) return;
     this.#idleGate ??= deferred<void>();

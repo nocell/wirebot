@@ -4,6 +4,17 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh`, a POSIX `sh` install wizard for a fresh Linux server, runnable as a one-liner. It
+  installs Docker when missing, signs Codex in with the device-code flow, connects Telegram,
+  Slack, or Discord with every token verified against the messenger's API, optionally sets
+  `PUBLIC_URL` after checking where the domain points (offering Caddy for automatic HTTPS), and
+  starts Wirebot. `--yes` takes everything from flags or the environment for unattended installs.
+- The installer registers `wirebot-updater.service`: it pulls newer images hourly and recreates
+  the containers only after three idle `/healthz` checks in a row, five minutes apart.
+- `/healthz` reports `busy`, true while a turn, a scheduled run, or a queued message is in flight.
+
 ## [0.3.1] - 2026-09-21
 
 ### Changed

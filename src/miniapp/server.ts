@@ -74,7 +74,7 @@ export interface MiniAppServerOptions {
     readonly allowedUserIds: ReadonlySet<number>;
   };
   readonly browserAuth?: BrowserAuth;
-  readonly codex: Pick<CodexService, "account">;
+  readonly codex: Pick<CodexService, "account" | "busy">;
   readonly configService: Pick<CodexConfigService, "read" | "update" | "validate">;
   readonly runtime: MiniAppRuntimeController;
   readonly settings: Pick<WirebotSettingsStore, "read" | "update">;
@@ -195,7 +195,12 @@ export class MiniAppServer {
     const url = new URL(request.url ?? "/", "http://localhost");
 
     if (request.method === "GET" && url.pathname === "/healthz") {
-      this.sendJson(response, 200, { ok: true, codex: this.#codexHealth });
+      this.sendJson(response, 200, {
+        ok: true,
+        codex: this.#codexHealth,
+        // The auto-updater waits for this to stay false before recreating the container.
+        busy: this.options.codex.busy,
+      });
       return;
     }
 

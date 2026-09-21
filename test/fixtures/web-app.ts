@@ -109,7 +109,7 @@ export async function startTestApp(assetDirectory?: string, includeTelegram = fa
     ...(includeTelegram
       ? { telegramAuth: { botToken: "123456:TEST_BOT_TOKEN", allowedUserIds: new Set([42]) } }
       : {}),
-    codex: { account: async () => ({ account: null, requiresOpenaiAuth: false }) },
+    codex: { account: async () => ({ account: null, requiresOpenaiAuth: false }), busy: false },
     runtime,
     configService: {
       read: async () => snapshot,

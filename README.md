@@ -20,9 +20,34 @@ Out of the box:
 
 ## Deployment
 
-> **Don't want to run a server?** [wirebot.ai](https://wirebot.ai) is the hosted version: set up in about 60 seconds, entirely from the browser, without ever touching a config file.
+### Quick install
 
-### Run with Docker
+On a fresh Linux server (x86_64 or arm64), one command sets everything up:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sadfun/wirebot/main/install.sh | sudo sh
+```
+
+The wizard takes about five minutes and is safe to re-run. It:
+
+1. Installs the latest Docker Engine if the server has none.
+2. Signs Codex in to your ChatGPT plan with the device-code flow.
+3. Walks you through connecting Telegram, Slack, or Discord, and verifies every token against the messenger's API before using it. On Telegram it learns your user ID from a message you send the bot.
+4. Optionally takes a (sub)domain for `PUBLIC_URL`, checks that it really points at the server, and offers to run [Caddy](https://caddyserver.com) next to Wirebot for automatic HTTPS when nothing serves it yet.
+5. Writes `docker-compose.yml` and `.env` to `/opt/wirebot`, starts Wirebot, and waits for it to report healthy.
+6. Registers `wirebot-updater.service`, which keeps Wirebot current without interrupting work (see [Updates](#updates)).
+
+For unattended installs, pass `--yes` and give everything as flags or as the environment variables from the [configuration reference](#configuration-reference) (the environment keeps secrets out of the process list):
+
+```sh
+export TELEGRAM_BOT_TOKEN=123456:replace-me TELEGRAM_ALLOWED_USER_IDS=123456789
+curl -fsSL https://raw.githubusercontent.com/sadfun/wirebot/main/install.sh |
+  sudo -E sh -s -- --yes --public-url https://codex.example.com --caddy
+```
+
+With `--yes` the Codex sign-in is skipped unless `CODEX_API_KEY` or `CODEX_CHATGPT_TOKEN` is given; send `/login` to the bot afterwards. `sh install.sh --help` lists every option.
+
+### Run with Docker manually
 
 Requirements: Docker (or any OCI runtime) and at least one configured Telegram, Slack, or Discord connector.
 
@@ -86,7 +111,9 @@ Codex's own command sandbox defaults to `danger-full-access` inside the containe
 docker compose pull && docker compose up -d
 ```
 
-State lives in the volume, so recreating the container is safe. [Watchtower](https://containrrr.dev/watchtower/) or your orchestrator can automate the pull. Images are tagged `latest` and `X.Y.Z` on GHCR; pin a version tag if you prefer explicit upgrades.
+State lives in the volume, so recreating the container is safe. Images are tagged `latest` and `X.Y.Z` on GHCR; pin a version tag if you prefer explicit upgrades.
+
+The [quick install](#quick-install) automates this with `wirebot-updater.service`, a small systemd service running `/opt/wirebot/updater.sh`. Every hour it pulls the images named in `docker-compose.yml`. Once a newer one has arrived, it asks `/healthz` every five minutes whether Wirebot is working — the `busy` field is true while a turn, a scheduled run, or a queued message is in flight — and recreates the containers after three idle answers in a row, so an update never cuts a running task short. Follow it with `journalctl -u wirebot-updater`; `systemctl disable --now wirebot-updater` turns it off. On a manual setup, [Watchtower](https://containrrr.dev/watchtower/) or your orchestrator can automate the pull instead.
 
 ### The web app URL
 
@@ -96,7 +123,7 @@ To expose the web app and Telegram Mini App, set a public HTTPS origin:
 PUBLIC_URL=https://codex.example.com
 ```
 
-and reverse-proxy that origin to the container's port 8787 (publish it in your compose file), or leave `PUBLIC_URL` unset: Wirebot then opens a [TryCloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) using the bundled pinned cloudflared. Quick tunnels are best-effort — the URL changes on every start and Cloudflare offers no uptime guarantee — so set `PUBLIC_URL` for a persistent deployment. Set `WIREBOT_TUNNEL=off` to never open a tunnel; without a tunnel or `PUBLIC_URL`, browser sign-in links and Telegram’s Settings button are unavailable, and Slack/Discord keep their in-chat settings picker. The HTTP app and health endpoint still run locally. The tunnel fallback works with any configured messenger, including Slack-only and Discord-only deployments.
+and reverse-proxy that origin to the container's port 8787 (publish it in your compose file; the [quick install](#quick-install) can run Caddy for this), or leave `PUBLIC_URL` unset: Wirebot then opens a [TryCloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) using the bundled pinned cloudflared. Quick tunnels are best-effort — the URL changes on every start and Cloudflare offers no uptime guarantee — so set `PUBLIC_URL` for a persistent deployment. Set `WIREBOT_TUNNEL=off` to never open a tunnel; without a tunnel or `PUBLIC_URL`, browser sign-in links and Telegram’s Settings button are unavailable, and Slack/Discord keep their in-chat settings picker. The HTTP app and health endpoint still run locally. The tunnel fallback works with any configured messenger, including Slack-only and Discord-only deployments.
 
 ### Configuration reference
 
@@ -283,6 +310,12 @@ The Release workflow verifies the tag, runs the checks, builds the `linux/amd64`
 
 ```sh
 docker compose down
+```
+
+After a [quick install](#quick-install), run that in `/opt/wirebot` and remove the updater too:
+
+```sh
+systemctl disable --now wirebot-updater && rm /etc/systemd/system/wirebot-updater.service
 ```
 
 Removing the `wirebot-data` volume permanently deletes conversations, Codex configuration and login state, the workspace, and everything the agent installed into the persistent paths.
