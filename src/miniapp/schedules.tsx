@@ -1,35 +1,46 @@
 /**
- * The Schedules tab: lists scheduled Codex runs and provides the editor for
- * creating and updating them, including the RRULE mapping helpers.
+ * The Schedules tab: rows with a pause switch, plus the editor for creating
+ * and updating schedules (delete lives in the editor). Desktop shows the list
+ * beside the open editor; phones stack them as list and sub-page.
  */
-import {
-  CalendarClock,
-  ChevronLeft,
-  CirclePlus,
-  Clock3,
-  Pause,
-  Pencil,
-  Play,
-  Trash2,
-} from "lucide-react";
-import { type FormEvent, type ReactElement, useCallback, useState } from "react";
+import { CalendarClock, Plus } from "lucide-react";
+import { type ReactElement, useCallback, useState } from "react";
 import type { ManagedSchedule } from "../automations/engine.js";
-import {
-  requestCreateSchedule,
-  requestDeleteSchedule,
-  requestSchedules,
-  requestUpdateSchedule,
-} from "./api.js";
+import { requestCreateSchedule, requestDeleteSchedule, requestUpdateSchedule } from "./api.js";
+import { cn } from "./cn.js";
+import { useAppData } from "./data.js";
 import { ConfirmDialog, ExpandableTextarea } from "./dialogs.js";
-import { isDefined, messageOf, useAsync } from "./shared.js";
+import {
+  BottomBar,
+  ContentHeader,
+  ListColHeader,
+  PageTitle,
+  Screen,
+  ScreenBody,
+  SplitView,
+  SubpageHeader,
+  TabBar,
+  useDesktop,
+} from "./layout.js";
+import { navigate, type Route, routeLink, useRoute } from "./route.js";
+import { isDefined, messageOf } from "./shared.js";
 import {
   confirmDiscardChanges,
-  nativeTelegramNavigation,
   notifyHaptic,
   useTelegramBackButton,
   useUnsavedChanges,
 } from "./telegram.js";
-import { Banner, Button, Caption, Headline, Placeholder, Section, Spinner } from "./ui.js";
+import {
+  Button,
+  Field,
+  Group,
+  Hint,
+  LoadingState,
+  Notice,
+  Placeholder,
+  Rule,
+  Switch,
+} from "./ui.js";
 
 type ScheduleCadence = "custom" | "daily" | "hourly" | "minutely" | "weekdays" | "weekly";
 
@@ -45,6 +56,11 @@ interface ScheduleDraft {
   readonly notificationPolicy: ManagedSchedule["notification_policy"];
 }
 
+interface PageNotice {
+  readonly tone: "success" | "warning" | "error";
+  readonly text: string;
+}
+
 const weekdayOptions = [
   ["MO", "Mon"],
   ["TU", "Tue"],
@@ -55,247 +71,292 @@ const weekdayOptions = [
   ["SU", "Sun"],
 ] as const;
 
-export function SchedulesManager(): ReactElement {
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const [editing, setEditing] = useState<ManagedSchedule | "new">();
-  const [deleting, setDeleting] = useState<ManagedSchedule>();
-  const [mutationId, setMutationId] = useState<string>();
-  const [mutationError, setMutationError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
-  const schedulesLoad = useAsync(requestSchedules, [loadAttempt]);
+const schedulesRoute: Route = { tab: "schedules" };
 
-  const refresh = (message?: string): void => {
-    setEditing(undefined);
-    setDeleting(undefined);
-    setMutationError(undefined);
-    setNotice(message);
-    setLoadAttempt((attempt) => attempt + 1);
-  };
+export function SchedulesTab(): ReactElement {
+  const route = useRoute();
+  const desktop = useDesktop();
+  const data = useAppData();
+  const [notice, setNotice] = useState<PageNotice>();
+  const [busyId, setBusyId] = useState<string>();
+  const schedules = data.schedules;
+  const detail = route.detail;
 
   const toggleStatus = async (schedule: ManagedSchedule): Promise<void> => {
-    if (mutationId !== undefined) return;
+    if (busyId !== undefined) return;
     const status = schedule.status === "active" ? "paused" : "active";
-    setMutationId(schedule.id);
-    setMutationError(undefined);
+    setBusyId(schedule.id);
     try {
-      await requestUpdateSchedule(schedule.id, {
+      const updated = await requestUpdateSchedule(schedule.id, {
         expected_revision: schedule.revision,
         status,
       });
+      data.updateSchedules((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
       notifyHaptic("success");
-      refresh(status === "active" ? `“${schedule.name}” resumed.` : `“${schedule.name}” paused.`);
+      setNotice({
+        tone: "success",
+        text: status === "active" ? `“${schedule.name}” resumed.` : `“${schedule.name}” paused.`,
+      });
     } catch (error) {
-      setMutationError(messageOf(error));
+      setNotice({ tone: "error", text: messageOf(error) });
       notifyHaptic("error");
     } finally {
-      setMutationId(undefined);
+      setBusyId(undefined);
     }
   };
-
-  const deleteSchedule = async (schedule: ManagedSchedule): Promise<void> => {
-    if (mutationId !== undefined) return;
-    setMutationId(schedule.id);
-    setMutationError(undefined);
-    try {
-      await requestDeleteSchedule(schedule.id);
-      notifyHaptic("success");
-      refresh(`“${schedule.name}” deleted.`);
-    } catch (error) {
-      setMutationError(messageOf(error));
-      notifyHaptic("error");
-    } finally {
-      setMutationId(undefined);
-    }
+  const onSaved = (schedule: ManagedSchedule, created: boolean): void => {
+    data.updateSchedules((current) =>
+      current.some((item) => item.id === schedule.id)
+        ? current.map((item) => (item.id === schedule.id ? schedule : item))
+        : [...current, schedule],
+    );
+    setNotice({
+      tone: "success",
+      text: created ? `“${schedule.name}” scheduled.` : `“${schedule.name}” updated.`,
+    });
+    navigate(desktop ? { tab: "schedules", detail: schedule.id } : schedulesRoute, {
+      replace: true,
+      force: true,
+    });
+  };
+  const onDeleted = (schedule: ManagedSchedule): void => {
+    data.updateSchedules((current) => current.filter((item) => item.id !== schedule.id));
+    setNotice({ tone: "success", text: `“${schedule.name}” deleted.` });
+    navigate(schedulesRoute, { replace: true, force: true });
   };
 
-  if (editing !== undefined) {
-    return (
-      <ScheduleEditor
-        schedule={editing === "new" ? undefined : editing}
-        onCancel={() => setEditing(undefined)}
-        onSaved={(schedule) => {
-          const created = editing === "new";
-          refresh(created ? `“${schedule.name}” scheduled.` : `“${schedule.name}” updated.`);
-        }}
+  if (schedules === undefined) {
+    const loading = (
+      <LoadingState
+        header={data.schedulesError === undefined ? "Loading schedules" : "Couldn’t load schedules"}
+        description="Reading your current scheduled runs…"
+        error={data.schedulesError}
+        onRetry={data.reloadSchedules}
       />
     );
-  }
-
-  const schedules = schedulesLoad.value;
-  if (schedules === undefined) {
-    if (schedulesLoad.error !== undefined) {
-      return (
-        <div className="loadingRoot tabbedLoadingRoot">
-          <Placeholder
-            header="Couldn’t load schedules"
-            description={schedulesLoad.error}
-            action={
-              <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Try again</Button>
-            }
-          />
-        </div>
-      );
-    }
+    if (desktop) return loading;
     return (
-      <div className="loadingRoot tabbedLoadingRoot">
-        <Placeholder header="Loading schedules" description="Reading your current scheduled runs…">
-          <Spinner size="l" />
-        </Placeholder>
-      </div>
+      <Screen>
+        {loading}
+        <TabBar route={route} />
+      </Screen>
     );
   }
 
   const ordered = [...schedules].sort(compareSchedules);
   const activeCount = ordered.filter((schedule) => schedule.status === "active").length;
+  const summary = `${activeCount} active · ${ordered.length - activeCount} paused`;
+  const editing =
+    detail === undefined || detail === "new"
+      ? undefined
+      : ordered.find((schedule) => schedule.id === detail);
+  const noticeLine =
+    notice === undefined ? undefined : <Notice tone={notice.tone}>{notice.text}</Notice>;
+  const newLink = (
+    <a className="pill" {...routeLink({ tab: "schedules", detail: "new" })}>
+      <Plus aria-hidden="true" />
+      New
+    </a>
+  );
+
+  if (desktop) {
+    return (
+      <SplitView
+        wide
+        list={
+          <>
+            <ListColHeader>
+              <span className="listCol-summary">{summary}</span>
+              {newLink}
+            </ListColHeader>
+            <div className="listCol-body">
+              {noticeLine}
+              {ordered.length === 0 ? (
+                <Hint>
+                  Nothing scheduled yet. Create a recurring task and Wirebot will run it even when
+                  the chat is quiet.
+                </Hint>
+              ) : (
+                ordered.map((schedule) => (
+                  <ScheduleItem
+                    key={schedule.id}
+                    schedule={schedule}
+                    selected={detail === schedule.id}
+                    busy={busyId === schedule.id}
+                    compact
+                    onToggle={() => void toggleStatus(schedule)}
+                  />
+                ))
+              )}
+            </div>
+          </>
+        }
+      >
+        {detail === "new" ? (
+          <ScheduleEditor
+            key="new"
+            schedule={undefined}
+            desktop
+            onSaved={onSaved}
+            onDeleted={onDeleted}
+          />
+        ) : editing !== undefined ? (
+          <ScheduleEditor
+            key={editing.id}
+            schedule={editing}
+            desktop
+            onSaved={onSaved}
+            onDeleted={onDeleted}
+          />
+        ) : detail !== undefined ? (
+          <div className="paneBody">
+            <Placeholder header="Schedule not found" description="It may have been deleted." />
+          </div>
+        ) : (
+          <div className="paneBody">
+            <Placeholder
+              header={ordered.length === 0 ? "Nothing scheduled yet" : "Select a schedule"}
+              description={
+                ordered.length === 0
+                  ? "Create a recurring task and Wirebot will run it even when the chat is quiet."
+                  : "Open a schedule from the list to edit it, or create a new one."
+              }
+              action={
+                <a
+                  className="btn btn-primary btn-m"
+                  {...routeLink({ tab: "schedules", detail: "new" })}
+                >
+                  Create a schedule
+                </a>
+              }
+            >
+              <CalendarClock className="placeholder-icon" aria-hidden="true" />
+            </Placeholder>
+          </div>
+        )}
+      </SplitView>
+    );
+  }
+
+  if (detail === "new" || editing !== undefined) {
+    return (
+      <ScheduleEditor
+        key={editing?.id ?? "new"}
+        schedule={editing}
+        desktop={false}
+        onSaved={onSaved}
+        onDeleted={onDeleted}
+      />
+    );
+  }
+  if (detail !== undefined) {
+    return (
+      <Screen className="screen-subpage">
+        <SubpageHeader back={{ label: "Schedules", route: schedulesRoute }} title="Schedule" />
+        <div className="paneBody">
+          <Placeholder header="Schedule not found" description="It may have been deleted." />
+        </div>
+      </Screen>
+    );
+  }
   return (
-    <main className="page schedulesPage">
-      <header className="pageHeader schedulesHeader">
-        <div>
-          <Headline Component="h1">Schedules</Headline>
-          <Caption className="pageSubtitle">
-            {activeCount} active · {ordered.length} total
-          </Caption>
-        </div>
-        <Button
-          type="button"
-          size="s"
-          className="scheduleCreateButton"
-          onClick={() => setEditing("new")}
-        >
-          <CirclePlus className="size-4" aria-hidden="true" />
-          New
-        </Button>
-      </header>
-      {notice === undefined ? undefined : (
-        <Caption className="scheduleNotice" role="status">
-          {notice}
-        </Caption>
-      )}
-      {mutationError === undefined ? undefined : (
-        <Banner
-          className="bannerSpacing"
-          header="Couldn’t update the schedule"
-          subheader={mutationError}
-        />
-      )}
-      {ordered.length === 0 ? (
-        <div className="scheduleEmpty">
-          <Placeholder
-            header="Nothing scheduled yet"
-            description="Create a recurring task and Wirebot will run it even when the chat is quiet."
-            action={<Button onClick={() => setEditing("new")}>Create a schedule</Button>}
-          >
-            <CalendarClock className="scheduleEmptyIcon" aria-hidden="true" />
-          </Placeholder>
-        </div>
-      ) : (
-        <div className="scheduleList">
-          {ordered.map((schedule) => (
-            <ScheduleCard
-              key={schedule.id}
-              schedule={schedule}
-              busy={mutationId === schedule.id}
-              onEdit={() => setEditing(schedule)}
-              onToggle={() => void toggleStatus(schedule)}
-              onDelete={() => {
-                setMutationError(undefined);
-                setDeleting(schedule);
-              }}
-            />
-          ))}
-        </div>
-      )}
-      {deleting === undefined ? undefined : (
-        <ConfirmDialog
-          title={`Delete “${deleting.name}”?`}
-          description="This permanently removes the schedule and its retained run history. It cannot be undone."
-          error={mutationError}
-          busy={mutationId === deleting.id}
-          confirmLabel="Delete schedule"
-          onCancel={() => {
-            if (mutationId === undefined) setDeleting(undefined);
-          }}
-          onConfirm={() => void deleteSchedule(deleting)}
-        />
-      )}
-    </main>
+    <Screen>
+      <PageTitle title="Schedules" subtitle={summary} action={newLink} />
+      <ScreenBody className="stack-sm">
+        {noticeLine}
+        {ordered.length === 0 ? (
+          <div className="emptyState">
+            <Placeholder
+              header="Nothing scheduled yet"
+              description="Create a recurring task and Wirebot will run it even when the chat is quiet."
+              action={
+                <a
+                  className="btn btn-primary btn-m"
+                  {...routeLink({ tab: "schedules", detail: "new" })}
+                >
+                  Create a schedule
+                </a>
+              }
+            >
+              <CalendarClock className="placeholder-icon" aria-hidden="true" />
+            </Placeholder>
+          </div>
+        ) : (
+          <>
+            <Group>
+              {ordered.map((schedule) => (
+                <ScheduleItem
+                  key={schedule.id}
+                  schedule={schedule}
+                  selected={false}
+                  busy={busyId === schedule.id}
+                  onToggle={() => void toggleStatus(schedule)}
+                />
+              ))}
+            </Group>
+            <Hint>
+              Tap a schedule to edit it. Switch it off to pause without losing the schedule.
+            </Hint>
+          </>
+        )}
+      </ScreenBody>
+      <TabBar route={route} />
+    </Screen>
   );
 }
 
-interface ScheduleCardProps {
+interface ScheduleItemProps {
   readonly schedule: ManagedSchedule;
+  readonly selected: boolean;
   readonly busy: boolean;
-  readonly onEdit: () => void;
+  readonly compact?: boolean;
   readonly onToggle: () => void;
-  readonly onDelete: () => void;
 }
 
-function ScheduleCard(props: ScheduleCardProps): ReactElement {
-  const schedule = props.schedule;
-  const nextRun =
+function ScheduleItem({
+  schedule,
+  selected,
+  busy,
+  compact,
+  onToggle,
+}: ScheduleItemProps): ReactElement {
+  const active = schedule.status === "active";
+  const next =
     schedule.status === "paused"
       ? "Paused"
       : schedule.next_run_at === null
         ? "No future run"
         : `Next ${formatScheduleDate(schedule.next_run_at, schedule.time_zone)}`;
   return (
-    <article className={`scheduleCard scheduleCard-${schedule.status}`}>
-      <div className="scheduleCardTopline">
-        <span className={`scheduleStatus scheduleStatus-${schedule.status}`}>
-          <span aria-hidden="true" />
-          {schedule.status === "active" ? "Active" : "Paused"}
-        </span>
-        <Caption className="scheduleKind">
-          {schedule.kind === "heartbeat" ? "Heartbeat" : "Fresh task"}
-        </Caption>
-      </div>
-      <div className="scheduleCardCopy">
-        <h2>{schedule.name}</h2>
-        <p className="ui-line-clamp-2">{schedule.prompt}</p>
-      </div>
-      <div className="scheduleTiming">
-        <Clock3 className="size-4" aria-hidden="true" />
-        <div>
-          <strong>{humanizeRrule(schedule.rrule)}</strong>
-          <Caption>{`${nextRun} · ${schedule.time_zone}`}</Caption>
-        </div>
-      </div>
-      {schedule.deferral_reason === null ? undefined : (
-        <Caption className="scheduleDeferral">Waiting: {schedule.deferral_reason}</Caption>
-      )}
-      <div className="scheduleActions">
-        <Button type="button" mode="bezeled" size="s" disabled={props.busy} onClick={props.onEdit}>
-          <Pencil className="size-4" aria-hidden="true" />
-          Edit
-        </Button>
-        <Button type="button" mode="bezeled" size="s" loading={props.busy} onClick={props.onToggle}>
-          {schedule.status === "active" ? (
-            <Pause className="size-4" aria-hidden="true" />
-          ) : (
-            <Play className="size-4" aria-hidden="true" />
-          )}
-          {schedule.status === "active" ? "Pause" : "Resume"}
-        </Button>
-        <Button
-          type="button"
-          mode="plain"
-          size="s"
-          className="scheduleDeleteButton"
-          aria-label={`Delete ${schedule.name}`}
-          disabled={props.busy}
-          onClick={props.onDelete}
-        >
-          <Trash2 className="size-4" aria-hidden="true" />
-        </Button>
-      </div>
-    </article>
+    <div
+      className={cn("row row-schedule", compact && "schedItem", selected && "schedItem-selected")}
+      aria-current={selected ? "page" : undefined}
+    >
+      <a className="row-copy" {...routeLink({ tab: "schedules", detail: schedule.id })}>
+        <span className={cn("row-label", !active && "text-muted")}>{schedule.name}</span>
+        <span className="row-detail">{`${humanizeRrule(schedule.rrule)} · ${next}`}</span>
+        {schedule.deferral_reason === null ? undefined : (
+          <span className="row-detail text-warning">Waiting: {schedule.deferral_reason}</span>
+        )}
+      </a>
+      <Switch
+        size={compact ? "s" : "m"}
+        checked={active}
+        disabled={busy}
+        aria-label={`${schedule.name}: ${active ? "active" : "paused"}`}
+        onCheckedChange={onToggle}
+      />
+    </div>
   );
 }
 
 interface ScheduleEditorProps {
   readonly schedule: ManagedSchedule | undefined;
-  readonly onCancel: () => void;
-  readonly onSaved: (schedule: ManagedSchedule) => void;
+  readonly desktop: boolean;
+  readonly onSaved: (schedule: ManagedSchedule, created: boolean) => void;
+  readonly onDeleted: (schedule: ManagedSchedule) => void;
 }
 
 function ScheduleEditor(props: ScheduleEditorProps): ReactElement {
@@ -303,6 +364,9 @@ function ScheduleEditor(props: ScheduleEditorProps): ReactElement {
   const [draft, setDraft] = useState<ScheduleDraft>(initialDraft);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const [idempotencyKey] = useState(scheduleAttemptId);
   const existing = props.schedule;
   const dirty = !scheduleDraftsEqual(draft, initialDraft);
@@ -311,20 +375,20 @@ function ScheduleEditor(props: ScheduleEditorProps): ReactElement {
   const cancel = useCallback((): void => {
     if (saving) return;
     if (!dirty) {
-      props.onCancel();
+      navigate(schedulesRoute);
       return;
     }
     void confirmDiscardChanges("Discard this schedule draft?").then((confirmed) => {
-      if (confirmed) props.onCancel();
+      if (confirmed) navigate(schedulesRoute, { force: true });
     });
-  }, [dirty, props.onCancel, saving]);
-  useTelegramBackButton(saving ? undefined : cancel);
+  }, [dirty, saving]);
+  useTelegramBackButton(saving || deleting ? undefined : cancel);
 
   const setValue = <Key extends keyof ScheduleDraft>(key: Key, value: ScheduleDraft[Key]): void => {
+    setError(undefined);
     setDraft((current) => ({ ...current, [key]: value }));
   };
-  const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
+  const submit = async (): Promise<void> => {
     if (saving) return;
     const validationError = validateScheduleDraft(draft);
     if (validationError !== undefined) {
@@ -350,7 +414,7 @@ function ScheduleEditor(props: ScheduleEditorProps): ReactElement {
               expected_revision: existing.revision,
             });
       notifyHaptic("success");
-      props.onSaved(schedule);
+      props.onSaved(schedule, existing === undefined);
     } catch (saveError) {
       setError(messageOf(saveError));
       notifyHaptic("error");
@@ -358,290 +422,327 @@ function ScheduleEditor(props: ScheduleEditorProps): ReactElement {
       setSaving(false);
     }
   };
+  const remove = async (): Promise<void> => {
+    if (existing === undefined || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await requestDeleteSchedule(existing.id);
+      notifyHaptic("success");
+      setDeleting(false);
+      props.onDeleted(existing);
+    } catch (removeError) {
+      setDeleteError(messageOf(removeError));
+      notifyHaptic("error");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
+  const title = existing === undefined ? "New schedule" : "Edit schedule";
+  const saveLabel = existing === undefined ? "Create schedule" : "Save changes";
   const showInterval = ["daily", "hourly", "minutely", "weekly"].includes(draft.cadence);
   const showTime = ["daily", "hourly", "weekdays", "weekly"].includes(draft.cadence);
-  return (
-    <form onSubmit={(event) => void submit(event)}>
-      <main className="page scheduleEditorPage">
-        <header className="skillDetailHeader scheduleEditorHeader">
-          {nativeTelegramNavigation ? undefined : (
-            <Button type="button" mode="plain" size="s" disabled={saving} onClick={cancel}>
-              <ChevronLeft className="size-4" aria-hidden="true" />
-              Schedules
+  const timeZoneInput = (
+    <input
+      id="schedule-time-zone"
+      className="control"
+      value={draft.timeZone}
+      maxLength={128}
+      autoComplete="off"
+      spellCheck={false}
+      placeholder="Europe/Warsaw"
+      aria-label="Time zone"
+      disabled={saving}
+      onChange={(event) => setValue("timeZone", event.currentTarget.value)}
+    />
+  );
+  const timeInput =
+    draft.cadence === "hourly" ? (
+      <input
+        id="schedule-time"
+        className="control"
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={59}
+        value={draft.time.slice(3)}
+        aria-label="Minute of the hour"
+        disabled={saving}
+        onChange={(event) => setValue("time", `00:${event.currentTarget.value.padStart(2, "0")}`)}
+      />
+    ) : (
+      <input
+        id="schedule-time"
+        className="control"
+        type="time"
+        value={draft.time}
+        aria-label="Time"
+        disabled={saving}
+        onChange={(event) => setValue("time", event.currentTarget.value)}
+      />
+    );
+  const timeLabel = draft.cadence === "hourly" ? "At minute" : "Time";
+  const summary = scheduleSummary(draft);
+  const deleteDialog =
+    deleting && existing !== undefined ? (
+      <ConfirmDialog
+        title={`Delete “${existing.name}”?`}
+        description="This permanently removes the schedule and its retained run history. It cannot be undone."
+        error={deleteError}
+        busy={deleteBusy}
+        confirmLabel="Delete schedule"
+        onCancel={() => {
+          if (!deleteBusy) setDeleting(false);
+        }}
+        onConfirm={() => void remove()}
+      />
+    ) : undefined;
+
+  const fields = (
+    <>
+      {error === undefined ? undefined : <Notice tone="error">{error}</Notice>}
+      <Field label="Name" htmlFor="schedule-name">
+        <input
+          id="schedule-name"
+          className="control"
+          value={draft.name}
+          maxLength={200}
+          autoComplete="off"
+          placeholder="Daily project check"
+          disabled={saving}
+          onChange={(event) => setValue("name", event.currentTarget.value)}
+        />
+      </Field>
+      <Field
+        label="Instructions"
+        htmlFor="schedule-prompt"
+        hint={
+          existing?.kind === "heartbeat"
+            ? "The full prompt Codex receives on every run. This heartbeat continues its original Codex task."
+            : "The full prompt Codex receives on every run. Each run starts a fresh task."
+        }
+      >
+        <ExpandableTextarea
+          id="schedule-prompt"
+          className="control-prompt"
+          label="schedule instructions"
+          value={draft.prompt}
+          maxLength={20_000}
+          rows={props.desktop ? 5 : 4}
+          placeholder="Check the repository for failed CI runs and summarize anything actionable."
+          disabled={saving}
+          onValueChange={(value) => setValue("prompt", value)}
+        />
+      </Field>
+      <Rule />
+      <Field label="Repeats" htmlFor="schedule-cadence">
+        <select
+          id="schedule-cadence"
+          className="control control-select"
+          value={draft.cadence}
+          disabled={saving}
+          onChange={(event) => setValue("cadence", event.currentTarget.value as ScheduleCadence)}
+        >
+          <option value="minutely">Every few minutes</option>
+          <option value="hourly">Hourly</option>
+          <option value="daily">Daily</option>
+          <option value="weekdays">Weekdays</option>
+          <option value="weekly">Weekly</option>
+          <option value="custom">Custom RRULE</option>
+        </select>
+      </Field>
+      {showInterval ? (
+        <Field label="Every" htmlFor="schedule-interval">
+          <div className="intervalControl">
+            <input
+              id="schedule-interval"
+              className="control"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={1_000}
+              value={draft.interval}
+              disabled={saving}
+              onChange={(event) => setValue("interval", event.currentTarget.value)}
+            />
+            <span className="intervalControl-unit">
+              {cadenceUnit(draft.cadence, Number(draft.interval))}
+            </span>
+          </div>
+        </Field>
+      ) : undefined}
+      {showTime ? (
+        props.desktop ? (
+          <Field label={timeLabel} htmlFor="schedule-time" hint={summary}>
+            <div className="timeRow">
+              {timeInput}
+              {timeZoneInput}
+            </div>
+          </Field>
+        ) : (
+          <>
+            <div className="fieldRow">
+              <Field label={timeLabel} htmlFor="schedule-time">
+                {timeInput}
+              </Field>
+              <Field label="Time zone" htmlFor="schedule-time-zone">
+                {timeZoneInput}
+              </Field>
+            </div>
+            <Hint className="form-inlineHint">{summary}</Hint>
+          </>
+        )
+      ) : (
+        <Field label="Time zone" htmlFor="schedule-time-zone" hint={summary}>
+          {timeZoneInput}
+        </Field>
+      )}
+      {draft.cadence === "weekly" ? (
+        <Field label="Days" as="span" hint="Choose one or more days.">
+          <fieldset className="weekdays">
+            <legend className="srOnly">Days of the week</legend>
+            {weekdayOptions.map(([value, label]) => {
+              const selected = draft.days.includes(value);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  className={cn("weekday", selected && "weekday-selected")}
+                  aria-pressed={selected}
+                  aria-label={label}
+                  disabled={saving}
+                  onClick={() =>
+                    setValue(
+                      "days",
+                      selected ? draft.days.filter((day) => day !== value) : [...draft.days, value],
+                    )
+                  }
+                >
+                  {label.slice(0, 2)}
+                </button>
+              );
+            })}
+          </fieldset>
+        </Field>
+      ) : undefined}
+      {draft.cadence === "custom" ? (
+        <Field
+          label="RRULE"
+          htmlFor="schedule-rrule"
+          hint="One bounded RRULE line; DTSTART is managed by Wirebot."
+        >
+          <ExpandableTextarea
+            id="schedule-rrule"
+            className="control-mono"
+            label="custom RRULE"
+            value={draft.customRrule}
+            rows={3}
+            maxLength={4_096}
+            spellCheck={false}
+            disabled={saving}
+            onValueChange={(value) => setValue("customRrule", value)}
+          />
+        </Field>
+      ) : undefined}
+      <Rule />
+      <Field
+        label="Notify me"
+        htmlFor="schedule-notifications"
+        hint="Runs still happen when notifications are off."
+      >
+        <select
+          id="schedule-notifications"
+          className="control control-select"
+          value={draft.notificationPolicy}
+          disabled={saving}
+          onChange={(event) =>
+            setValue(
+              "notificationPolicy",
+              event.currentTarget.value as ManagedSchedule["notification_policy"],
+            )
+          }
+        >
+          <option value="always">After every run</option>
+          <option value="on-result">Only when there is something to report</option>
+          <option value="never">Never</option>
+        </select>
+      </Field>
+    </>
+  );
+
+  if (props.desktop) {
+    return (
+      <>
+        <ContentHeader
+          crumbs={
+            existing === undefined ? ["Schedules", "New schedule"] : ["Editing", existing.name]
+          }
+        >
+          {existing === undefined ? undefined : (
+            <Button
+              variant="secondary"
+              size="s"
+              className="btn-dangerText"
+              disabled={saving}
+              onClick={() => {
+                setDeleteError(undefined);
+                setDeleting(true);
+              }}
+            >
+              Delete
             </Button>
           )}
-          <Headline Component="h1">
-            {existing === undefined ? "New schedule" : "Edit schedule"}
-          </Headline>
-          <Caption className="pageSubtitle">
-            {existing?.kind === "heartbeat"
-              ? "This heartbeat continues its original Codex task."
-              : "Each run starts a fresh persistent Codex task."}
-          </Caption>
-        </header>
-        {error === undefined ? undefined : (
-          <Banner
-            className="bannerSpacing"
-            header="Couldn’t save this schedule"
-            subheader={error}
-          />
+          <Button
+            size="s"
+            loading={saving}
+            disabled={existing !== undefined && !dirty}
+            onClick={() => void submit()}
+          >
+            {existing === undefined ? "Create" : "Save"}
+          </Button>
+        </ContentHeader>
+        <main className="paneBody">
+          <div className="form form-narrow">{fields}</div>
+        </main>
+        {deleteDialog}
+      </>
+    );
+  }
+  return (
+    <Screen className="screen-subpage">
+      <SubpageHeader back={{ label: "Schedules", route: schedulesRoute }} title={title} />
+      <ScreenBody className="form screenBody-withBar">
+        {fields}
+        {existing === undefined ? undefined : (
+          <Button
+            variant="secondary"
+            size="l"
+            stretched
+            className="btn-dangerText deleteButton"
+            disabled={saving}
+            onClick={() => {
+              setDeleteError(undefined);
+              setDeleting(true);
+            }}
+          >
+            Delete schedule
+          </Button>
         )}
-        <div className="sectionStack">
-          <Section header="Task" footer="Give Codex enough detail to run unattended.">
-            <div className="field">
-              <Caption Component="label" className="controlLabel" htmlFor="schedule-name">
-                Name
-              </Caption>
-              <input
-                id="schedule-name"
-                className="nativeControl"
-                value={draft.name}
-                maxLength={200}
-                autoComplete="off"
-                placeholder="Daily project check"
-                disabled={saving}
-                onChange={(event) => setValue("name", event.currentTarget.value)}
-              />
-              <Caption className="fieldHint">
-                A short label for notifications and this list.
-              </Caption>
-            </div>
-            <div className="field">
-              <Caption Component="label" className="controlLabel" htmlFor="schedule-prompt">
-                Instructions
-              </Caption>
-              <ExpandableTextarea
-                id="schedule-prompt"
-                className="nativeControl nativeTextarea schedulePrompt"
-                label="schedule instructions"
-                value={draft.prompt}
-                maxLength={20_000}
-                rows={5}
-                placeholder="Check the repository for failed CI runs and summarize anything actionable."
-                disabled={saving}
-                onValueChange={(value) => setValue("prompt", value)}
-              />
-              <Caption className="fieldHint">
-                This is the full prompt Codex receives on every run.
-              </Caption>
-            </div>
-          </Section>
-          <Section
-            header="Timing"
-            footer="Times use the selected IANA time zone, including daylight saving changes."
-          >
-            <div className="field">
-              <Caption Component="label" className="controlLabel" htmlFor="schedule-cadence">
-                Repeats
-              </Caption>
-              <select
-                id="schedule-cadence"
-                className="nativeControl nativeSelect"
-                value={draft.cadence}
-                disabled={saving}
-                onChange={(event) =>
-                  setValue("cadence", event.currentTarget.value as ScheduleCadence)
-                }
-              >
-                <option value="minutely">Every few minutes</option>
-                <option value="hourly">Hourly</option>
-                <option value="daily">Daily</option>
-                <option value="weekdays">Weekdays</option>
-                <option value="weekly">Weekly</option>
-                <option value="custom">Custom RRULE</option>
-              </select>
-              <Caption className="fieldHint">
-                Common schedules stay readable; custom rules remain editable.
-              </Caption>
-            </div>
-            {showInterval ? (
-              <div className="field">
-                <Caption Component="label" className="controlLabel" htmlFor="schedule-interval">
-                  Every
-                </Caption>
-                <div className="scheduleIntervalControl">
-                  <input
-                    id="schedule-interval"
-                    className="nativeControl"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={1_000}
-                    value={draft.interval}
-                    disabled={saving}
-                    onChange={(event) => setValue("interval", event.currentTarget.value)}
-                  />
-                  <Caption>{cadenceUnit(draft.cadence, Number(draft.interval))}</Caption>
-                </div>
-                <Caption className="fieldHint">
-                  Use 1 for every {cadenceUnit(draft.cadence, 1)}.
-                </Caption>
-              </div>
-            ) : undefined}
-            {showTime ? (
-              <div className="field scheduleTimeRow">
-                <div>
-                  <Caption Component="label" className="controlLabel" htmlFor="schedule-time">
-                    {draft.cadence === "hourly" ? "At minute" : "Time"}
-                  </Caption>
-                  {draft.cadence === "hourly" ? (
-                    <input
-                      id="schedule-time"
-                      className="nativeControl"
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={59}
-                      value={draft.time.slice(3)}
-                      disabled={saving}
-                      onChange={(event) =>
-                        setValue("time", `00:${event.currentTarget.value.padStart(2, "0")}`)
-                      }
-                    />
-                  ) : (
-                    <input
-                      id="schedule-time"
-                      className="nativeControl"
-                      type="time"
-                      value={draft.time}
-                      disabled={saving}
-                      onChange={(event) => setValue("time", event.currentTarget.value)}
-                    />
-                  )}
-                </div>
-                <div>
-                  <Caption Component="label" className="controlLabel" htmlFor="schedule-time-zone">
-                    Time zone
-                  </Caption>
-                  <input
-                    id="schedule-time-zone"
-                    className="nativeControl"
-                    value={draft.timeZone}
-                    maxLength={128}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="Europe/Warsaw"
-                    disabled={saving}
-                    onChange={(event) => setValue("timeZone", event.currentTarget.value)}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="field">
-                <Caption Component="label" className="controlLabel" htmlFor="schedule-time-zone">
-                  Time zone
-                </Caption>
-                <input
-                  id="schedule-time-zone"
-                  className="nativeControl"
-                  value={draft.timeZone}
-                  maxLength={128}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="Europe/Warsaw"
-                  disabled={saving}
-                  onChange={(event) => setValue("timeZone", event.currentTarget.value)}
-                />
-                <Caption className="fieldHint">
-                  Use an IANA time zone, such as Europe/Warsaw.
-                </Caption>
-              </div>
-            )}
-            {draft.cadence === "weekly" ? (
-              <fieldset className="field scheduleDaysField">
-                <legend className="controlLabel">Days</legend>
-                <div className="weekdayPicker">
-                  {weekdayOptions.map(([value, label]) => {
-                    const selected = draft.days.includes(value);
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        className={
-                          selected ? "weekdayButton weekdayButtonSelected" : "weekdayButton"
-                        }
-                        aria-pressed={selected}
-                        disabled={saving}
-                        onClick={() =>
-                          setValue(
-                            "days",
-                            selected
-                              ? draft.days.filter((day) => day !== value)
-                              : [...draft.days, value],
-                          )
-                        }
-                      >
-                        {label.slice(0, 2)}
-                      </button>
-                    );
-                  })}
-                </div>
-                <Caption className="fieldHint">Choose one or more days.</Caption>
-              </fieldset>
-            ) : undefined}
-            {draft.cadence === "custom" ? (
-              <div className="field">
-                <Caption Component="label" className="controlLabel" htmlFor="schedule-rrule">
-                  RRULE
-                </Caption>
-                <ExpandableTextarea
-                  id="schedule-rrule"
-                  className="nativeControl nativeTextarea scheduleRrule"
-                  label="custom RRULE"
-                  value={draft.customRrule}
-                  rows={3}
-                  maxLength={4_096}
-                  spellCheck={false}
-                  disabled={saving}
-                  onValueChange={(value) => setValue("customRrule", value)}
-                />
-                <Caption className="fieldHint">
-                  One bounded RRULE line; DTSTART is managed by Wirebot.
-                </Caption>
-              </div>
-            ) : undefined}
-          </Section>
-          <Section
-            header="Notifications"
-            footer="Heartbeat schedules can decide when a result is important."
-          >
-            <div className="field">
-              <Caption Component="label" className="controlLabel" htmlFor="schedule-notifications">
-                Notify me
-              </Caption>
-              <select
-                id="schedule-notifications"
-                className="nativeControl nativeSelect"
-                value={draft.notificationPolicy}
-                disabled={saving}
-                onChange={(event) =>
-                  setValue(
-                    "notificationPolicy",
-                    event.currentTarget.value as ManagedSchedule["notification_policy"],
-                  )
-                }
-              >
-                <option value="always">After every run</option>
-                <option value="on-result">Only when there is something to report</option>
-                <option value="never">Never</option>
-              </select>
-              <Caption className="fieldHint">
-                Runs still happen when notifications are suppressed.
-              </Caption>
-            </div>
-          </Section>
-        </div>
-        <div className="scheduleEditorActions">
-          <Button type="button" mode="bezeled" size="l" disabled={saving} onClick={cancel}>
-            Cancel
-          </Button>
-          <Button type="submit" size="l" loading={saving}>
-            {existing === undefined ? "Create schedule" : "Save changes"}
-          </Button>
-        </div>
-      </main>
-    </form>
+      </ScreenBody>
+      <BottomBar>
+        <Button
+          size="l"
+          stretched
+          loading={saving}
+          disabled={existing !== undefined && !dirty}
+          onClick={() => void submit()}
+        >
+          {saveLabel}
+        </Button>
+      </BottomBar>
+      {deleteDialog}
+    </Screen>
   );
 }
 
@@ -783,6 +884,27 @@ function rruleFromDraft(draft: ScheduleDraft): string {
   }
 }
 
+/** "Runs weekdays at 09:00, following daylight-saving changes in Europe/Warsaw." */
+function scheduleSummary(draft: ScheduleDraft): string {
+  const timeZone = draft.timeZone.trim();
+  const zone = timeZone.length === 0 ? "the selected time zone" : timeZone;
+  if (draft.cadence === "custom") {
+    const rule = draft.customRrule.trim();
+    const described = rule.length === 0 ? undefined : humanizeRrule(rule);
+    return described === undefined || described === rule
+      ? `Runs on the custom rule, following daylight-saving changes in ${zone}.`
+      : `Runs ${lowerFirst(described)}, following daylight-saving changes in ${zone}.`;
+  }
+  if (validateScheduleDraft({ ...draft, name: "x", prompt: "x", timeZone: "UTC" }) !== undefined) {
+    return `Times use ${zone}, including daylight-saving changes.`;
+  }
+  return `Runs ${lowerFirst(humanizeRrule(rruleFromDraft(draft)))}, following daylight-saving changes in ${zone}.`;
+}
+
+function lowerFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`;
+}
+
 function humanizeRrule(rule: string): string {
   const fields = parseRruleFields(rule);
   if (fields === undefined) return rule;
@@ -882,14 +1004,24 @@ function formatScheduleDate(value: string, timeZone: string): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+    const time = new Intl.DateTimeFormat(undefined, {
       hour: "2-digit",
       minute: "2-digit",
       timeZone,
     }).format(date);
+    const dayKey = (candidate: Date): string =>
+      new Intl.DateTimeFormat("en-CA", { dateStyle: "short", timeZone }).format(candidate);
+    const now = new Date();
+    if (dayKey(date) === dayKey(now)) return `today ${time}`;
+    const withinWeek = date.getTime() - now.getTime() < 6 * 86_400_000;
+    const day = new Intl.DateTimeFormat(undefined, {
+      ...(withinWeek
+        ? { weekday: "short" as const }
+        : { month: "short" as const, day: "numeric" as const }),
+      ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" as const }),
+      timeZone,
+    }).format(date);
+    return `${day} ${time}`;
   } catch {
     return date.toLocaleString();
   }

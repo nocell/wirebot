@@ -17,6 +17,20 @@ All notable changes to Wirebot are documented in this file.
   of staying down until someone sends `/restart`. Turns wait during the relaunch and resume on the
   new server; `/restart` remains the fallback once the attempts are exhausted.
 
+### Changed
+
+- The web app and Telegram Mini App were redesigned around a summary and sub-pages. Settings
+  opens as a summary list with usage limits, the current value of each configuration page, the
+  remote session toggle, and the runtime controls; Model, Access & approvals, Features,
+  Environment, and Remote session are separate pages that each save on their own. Wide browsers
+  use a left rail that lists those pages with their current values and shows usage limits, and
+  open Skills and Schedules as a list beside the detail; phones drop the tab bar on sub-pages in
+  favor of a back link and one bottom action. Skill detail uses Instructions and Files tabs (a
+  file tree beside the instructions on desktop), the Skills list is searchable, and schedules are
+  rows with a pause switch whose delete action lives in the editor. Detail pages have
+  bookmarkable URLs, and the app shows its version in the rail and on the Settings home.
+- The browser bundle now ships React's production build.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added

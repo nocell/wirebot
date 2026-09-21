@@ -12,6 +12,7 @@ declare const Bun: {
     format?: "esm" | "cjs" | "iife";
     minify?: boolean;
     sourcemap?: "none" | "linked" | "inline" | "external";
+    define?: Readonly<Record<string, string>>;
   }): Promise<{
     success: boolean;
     logs: readonly { message: string }[];

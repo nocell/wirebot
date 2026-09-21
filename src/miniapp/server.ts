@@ -22,6 +22,7 @@ import type { WirebotSettingsStore } from "../core/settings-store.js";
 import type { GetAccountResponse } from "../generated/codex/v2/GetAccountResponse.js";
 import { BridgeError, errorMessage } from "../shared/errors.js";
 import type { Logger } from "../shared/logger.js";
+import { wirebotVersion } from "../shared/version.js";
 import { validateTelegramInitData } from "./auth.js";
 import { type AppPrincipal, type BrowserAuth, sessionLifetimeMs } from "./browser-auth.js";
 
@@ -29,22 +30,26 @@ const MAX_REQUEST_BYTES = 32 * 1_024;
 const MAX_AUTH_AGE_SECONDS = 60 * 60;
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 
-const staticAssets = new Map<
-  string,
-  readonly ["index.html" | "app.js" | "app.css" | "favicon.ico", string]
->([
-  ...["/", "/app", "/app/", "/app/settings", "/app/skills", "/app/schedules"].map(
-    (path): [string, readonly ["index.html", string]] => [
-      path,
-      ["index.html", "text/html; charset=utf-8"],
-    ],
-  ),
+type StaticAsset = readonly ["index.html" | "app.js" | "app.css" | "favicon.ico", string];
+
+const htmlAsset: StaticAsset = ["index.html", "text/html; charset=utf-8"];
+const staticAssets = new Map<string, StaticAsset>([
+  ["/", htmlAsset],
+  ["/app", htmlAsset],
+  ["/app/", htmlAsset],
   ["/favicon.ico", ["favicon.ico", "image/x-icon"]],
-  ["/miniapp", ["index.html", "text/html; charset=utf-8"]],
-  ["/miniapp/", ["index.html", "text/html; charset=utf-8"]],
+  ["/miniapp", htmlAsset],
+  ["/miniapp/", htmlAsset],
   ["/miniapp/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/miniapp/app.css", ["app.css", "text/css; charset=utf-8"]],
 ]);
+/** Browser deep links: a tab, optionally with a Settings page, skill name, or schedule id. */
+const appRoutePattern =
+  /^\/app\/(?:settings(?:\/(?:model|access|features|environment|remote))?|skills(?:\/[^/]+)?|schedules(?:\/[^/]+)?)\/?$/u;
+
+function staticAssetFor(pathname: string): StaticAsset | undefined {
+  return staticAssets.get(pathname) ?? (appRoutePattern.test(pathname) ? htmlAsset : undefined);
+}
 
 const settingsUpdateSchema = z.strictObject({
   expectedVersion: z.string().nullable(),
@@ -200,7 +205,7 @@ export class MiniAppServer {
         return;
       }
 
-      const asset = staticAssets.get(url.pathname);
+      const asset = staticAssetFor(url.pathname);
       if (asset !== undefined) {
         await this.sendAsset(response, request.method, asset[0], asset[1]);
         return;
@@ -266,6 +271,7 @@ export class MiniAppServer {
           ...snapshot,
           wirebot: this.options.settings.read(),
           runtime: this.options.runtime.status(),
+          wirebotVersion,
         });
         return;
       }
@@ -295,6 +301,7 @@ export class MiniAppServer {
           ...(writeOutcome === undefined ? {} : { writeOutcome }),
           wirebot: this.options.settings.read(),
           runtime: this.options.runtime.status(),
+          wirebotVersion,
         });
         return;
       }

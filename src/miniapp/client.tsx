@@ -23,7 +23,7 @@ const { webApp } = await import("./telegram.js");
 const element = document.getElementById("root");
 if (element === null) throw new Error("Wirebot root element is missing");
 const root = createRoot(element);
-element.className = `appRoot bg-background text-foreground ${webApp ? "telegramApp" : "browserApp"}`;
+element.className = `appRoot ${webApp ? "telegramApp" : "browserApp"}`;
 
 // Host listeners live for the document's lifetime, independently of React renders.
 if (webApp !== undefined) {
@@ -73,7 +73,7 @@ if (webApp !== undefined) {
   showApp("telegram");
 } else {
   root.render(
-    <div className="loadingRoot">
+    <div className="loadingState loadingState-full">
       <Placeholder header="Opening Wirebot">
         <Spinner size="l" />
       </Placeholder>

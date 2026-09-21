@@ -26,6 +26,7 @@ export type LoadedSnapshot = EditableConfigSnapshot & {
   readonly wirebot: WirebotSettings;
   readonly runtime: CodexRuntimeStatus;
   readonly writeOutcome?: ConfigWriteResponse | undefined;
+  readonly wirebotVersion?: string | undefined;
 };
 
 export class ConfigApiError extends Error {

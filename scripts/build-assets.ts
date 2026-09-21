@@ -23,6 +23,8 @@ const result = await Bun.build({
   format: "esm",
   minify: true,
   sourcemap: "none",
+  // React ships development and production builds; pick the production one.
+  define: { "process.env.NODE_ENV": JSON.stringify("production") },
 });
 
 if (!result.success) {

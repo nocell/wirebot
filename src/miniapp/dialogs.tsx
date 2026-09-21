@@ -1,11 +1,13 @@
 /**
  * Modal chrome shared by every overlay: the scroll-lock/Escape/BackButton
- * hook, the confirm dialog, and the full-screen text editors.
+ * hook, the confirm dialog, the generic sheet, and the full-screen text
+ * editors behind every multiline input.
  */
 import { Check, Maximize2, X } from "lucide-react";
 import {
   type MouseEvent,
   type ReactElement,
+  type ReactNode,
   type TextareaHTMLAttributes,
   useCallback,
   useEffect,
@@ -13,6 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { cn } from "./cn.js";
 import { confirmDiscardChanges, useTelegramBackButton, useUnsavedChanges } from "./telegram.js";
 import { Button, Caption } from "./ui.js";
 
@@ -60,18 +63,22 @@ export function ConfirmDialog(props: ConfirmDialogProps): ReactElement {
   };
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop dismisses on click; Escape is handled while the dialog is open.
-    <div className="resetDialogBackdrop" onMouseDown={dismissBackdrop}>
+    <div className="modalBackdrop" onMouseDown={dismissBackdrop}>
       <section
-        className="resetDialog"
+        className="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={`${dialogId}-title`}
         aria-describedby={`${dialogId}-description`}
       >
-        <h2 id={`${dialogId}-title`}>{props.title}</h2>
-        <p id={`${dialogId}-description`}>{props.description}</p>
+        <h2 id={`${dialogId}-title`} className="modal-title">
+          {props.title}
+        </h2>
+        <p id={`${dialogId}-description`} className="modal-description">
+          {props.description}
+        </p>
         {props.facts === undefined || props.facts.length === 0 ? undefined : (
-          <dl className="resetDialogFacts">
+          <dl className="modal-facts">
             {props.facts.map(([label, value]) => (
               <div key={label}>
                 <dt>{label}</dt>
@@ -81,24 +88,63 @@ export function ConfirmDialog(props: ConfirmDialogProps): ReactElement {
           </dl>
         )}
         {props.error === undefined ? undefined : (
-          <Caption className="resetDialogError" role="alert">
+          <Caption className="modal-error" role="alert">
             {props.error}
           </Caption>
         )}
-        <div className="resetDialogActions">
-          <Button type="button" mode="bezeled" disabled={props.busy} onClick={props.onCancel}>
+        <div className="modal-actions">
+          <Button variant="secondary" disabled={props.busy} onClick={props.onCancel}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            className="resetConfirmApply"
-            loading={props.busy}
-            autoFocus
-            onClick={props.onConfirm}
-          >
+          <Button variant="destructive" loading={props.busy} autoFocus onClick={props.onConfirm}>
             {props.confirmLabel}
           </Button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+interface SheetProps {
+  readonly title: string;
+  readonly description?: ReactNode;
+  readonly footer?: ReactNode;
+  readonly className?: string;
+  readonly onClose: () => void;
+  readonly children: ReactNode;
+}
+
+/** A dismissable panel: a bottom sheet on phones, a centered card on desktop. */
+export function Sheet(props: SheetProps): ReactElement {
+  useModalChrome(props.onClose);
+  const sheetId = useId();
+  const dismissBackdrop = (event: MouseEvent<HTMLDivElement>): void => {
+    if (event.target === event.currentTarget) props.onClose();
+  };
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop dismisses on click; Escape is handled while the sheet is open.
+    <div className="modalBackdrop modalBackdrop-sheet" onMouseDown={dismissBackdrop}>
+      <section
+        className={cn("sheet", props.className)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${sheetId}-title`}
+      >
+        <header className="sheet-header">
+          <div className="sheet-heading">
+            <strong id={`${sheetId}-title`}>{props.title}</strong>
+            {props.description === undefined ? undefined : (
+              <Caption className="sheet-description">{props.description}</Caption>
+            )}
+          </div>
+          <button type="button" className="sheet-close" aria-label="Close" onClick={props.onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </header>
+        <div className="sheet-body">{props.children}</div>
+        {props.footer === undefined ? undefined : (
+          <footer className="sheet-footer">{props.footer}</footer>
+        )}
       </section>
     </div>
   );
@@ -124,11 +170,11 @@ export function ExpandableTextarea({
   const [expanded, setExpanded] = useState(false);
   return (
     <>
-      <div className="expandableTextarea">
+      <div className="expandable">
         <textarea
           {...textareaProps}
           id={id}
-          className={className}
+          className={cn("control control-textarea", className)}
           value={value}
           rows={rows}
           disabled={disabled}
@@ -136,7 +182,7 @@ export function ExpandableTextarea({
         />
         <button
           type="button"
-          className="expandTextareaButton"
+          className="expandable-button"
           aria-label={`Edit ${label} full screen`}
           title="Edit full screen"
           disabled={disabled}
@@ -198,47 +244,36 @@ function FullscreenTextEditor(props: FullscreenTextEditorProps): ReactElement {
 
   return (
     <section
-      className="fullscreenEditor"
+      className="editor"
       role="dialog"
       aria-modal="true"
       aria-labelledby={`${textareaId}-title`}
     >
-      <header className="fullscreenEditorHeader">
-        <Button
-          type="button"
-          mode="plain"
-          size="s"
-          className="fullscreenEditorClose"
-          onClick={close}
-        >
-          <X className="size-5" aria-hidden="true" />
-          <span className="fullscreenEditorCloseLabel">Cancel</span>
+      <header className="editor-header">
+        <Button variant="plain" size="s" className="editor-close" onClick={close}>
+          <X aria-hidden="true" />
+          <span className="editor-closeLabel">Cancel</span>
         </Button>
-        <div className="fullscreenEditorHeading">
+        <div className="editor-heading">
           <strong id={`${textareaId}-title`}>{props.label}</strong>
           <Caption>{dirty ? "Draft not applied" : "Editing draft"}</Caption>
         </div>
-        <Button
-          type="button"
-          size="s"
-          className="fullscreenEditorApply"
-          onClick={() => props.onApply(value)}
-        >
-          <Check className="size-4" aria-hidden="true" />
+        <Button size="s" className="editor-apply" onClick={() => props.onApply(value)}>
+          <Check aria-hidden="true" />
           Apply
         </Button>
       </header>
-      <div className="fullscreenEditorBody">
+      <div className="editor-body">
         <textarea
           {...props.textareaProps}
           ref={textareaRef}
           id={textareaId}
-          className="fullscreenEditorTextarea"
+          className="editor-textarea"
           value={value}
           onChange={(event) => setValue(event.currentTarget.value)}
         />
       </div>
-      <footer className="fullscreenEditorFooter">
+      <footer className="editor-footer">
         <Caption>
           {value.length.toLocaleString()}
           {props.textareaProps.maxLength === undefined
