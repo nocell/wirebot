@@ -315,15 +315,18 @@ export class CodexService {
     let dequeued = false;
     try {
       const startsQueued = this.#queue.isBusy(conversationKey);
-      let preparedText: Promise<string> | undefined;
+      let preparedText: Promise<{ text: string; requestText: string | undefined }> | undefined;
       if (shouldTranscribe) {
         await stream.start({ summary: "Transcribing…", actions: [], plan: [] });
-        preparedText = this.transcribeVoiceMessages(text, syntheticText, voiceAttachments).then(
-          (prepared) => {
-            stream.setProgress({ summary: "Thinking…", actions: [], plan: [] });
-            return prepared;
-          },
-        );
+        preparedText = this.transcribeVoiceMessages(
+          text,
+          syntheticText,
+          voiceAttachments,
+          requestText,
+        ).then((prepared) => {
+          stream.setProgress({ summary: "Thinking…", actions: [], plan: [] });
+          return prepared;
+        });
         void preparedText.catch(() => undefined);
       } else if (startsQueued) {
         await stream.start({ summary: "Queued behind earlier work…", actions: [], plan: [] });
@@ -342,11 +345,11 @@ export class CodexService {
               await stream.start();
             }
           }
-          const prepared = preparedText === undefined ? text : await preparedText;
+          const prepared = preparedText === undefined ? { text, requestText } : await preparedText;
           this.#logger.debug("Preparing Codex turn", { conversationKey, connector });
           const [settings, skillInputs] = await Promise.all([
             this.#effectiveSettings(),
-            this.#explicitSkillInputs(prepared),
+            this.#explicitSkillInputs(prepared.requestText ?? prepared.text),
           ]);
           const threadId = await this.ensureThread(
             conversationKey,
@@ -369,8 +372,8 @@ export class CodexService {
             autoSettings = await this.#autoRouting?.({
               conversationKey,
               threadId,
-              text: prepared,
-              ...(requestText === undefined || shouldTranscribe ? {} : { requestText }),
+              text: prepared.text,
+              ...(prepared.requestText === undefined ? {} : { requestText: prepared.requestText }),
               model,
               hasAttachments: attachments.length > 0,
               signal: routing.signal,
@@ -401,7 +404,7 @@ export class CodexService {
             invocation,
             conversationKey,
             connector,
-            input: [...createTurnInput(prepared, connector, attachments), ...skillInputs],
+            input: [...createTurnInput(prepared.text, connector, attachments), ...skillInputs],
             turnSettings: { ...settings.turn, ...autoSettings },
             onStarted: () => {
               started = true;
@@ -582,9 +585,10 @@ export class CodexService {
     text: string,
     syntheticText: boolean,
     attachments: readonly InboundAttachment[],
-  ): Promise<string> {
+    requestText?: string,
+  ): Promise<{ text: string; requestText: string | undefined }> {
     const transcriber = this.#voiceTranscriber;
-    if (transcriber === undefined) return text;
+    if (transcriber === undefined) return { text, requestText };
     let transcripts: readonly string[];
     try {
       transcripts = await Promise.all(
@@ -599,7 +603,13 @@ export class CodexService {
       });
       const notice =
         "Note: voice transcription is unavailable, so the voice message is forwarded untranscribed as an audio file.";
-      return [text.trim(), notice].filter((part) => part.length > 0).join("\n\n");
+      return {
+        text: [text.trim(), notice].filter((part) => part.length > 0).join("\n\n"),
+        requestText:
+          requestText === undefined
+            ? undefined
+            : [requestText.trim(), notice].filter((part) => part.length > 0).join("\n\n"),
+      };
     }
     const base = syntheticText ? "" : text.trim();
     const blocks = transcripts.map((transcript, index) => {
@@ -609,7 +619,15 @@ export class CodexService {
           : `Voice message transcript ${index + 1}:`;
       return `${heading}\n${transcript}`;
     });
-    return [base, ...blocks].filter((part) => part.length > 0).join("\n\n");
+    return {
+      text: [base, ...blocks].filter((part) => part.length > 0).join("\n\n"),
+      requestText:
+        requestText === undefined
+          ? undefined
+          : [syntheticText ? "" : requestText.trim(), ...blocks]
+              .filter((part) => part.length > 0)
+              .join("\n\n"),
+    };
   }
 
   public async resetConversation(conversationKey: string): Promise<void> {

@@ -31,6 +31,7 @@ import { escapeSlackEntities } from "./format.js";
 import {
   describeSlackFile,
   formatThreadContext,
+  type NormalizedSlackMessage,
   normalizeSlackMessage,
   parseSlackCommand,
   routeSlackMessage,
@@ -345,14 +346,48 @@ export class SlackChannel implements MessagingChannel {
     if (this.wasRecentlyProcessed(`message:${event.channel}:${event.ts}`)) return;
     const route = routeSlackMessage(event, botUserId);
     if (route === undefined) return;
-    const work = () => this.processMessageEvent(event);
+    const normalized = normalizeSlackMessage(event, botUserId);
+    const work = () => this.processMessageEvent(event, normalized);
     // Reserve arrival order before any history, membership, or attachment I/O.
     // Commands bypass the turn queue so stop/new remain immediately available.
-    if (parseSlackCommand(normalizeSlackMessage(event, botUserId).text) !== undefined) await work();
-    else await this.#messages.run(`${event.channel}:${route.conversationSuffix}`, work);
+    if (normalized.files.length === 0 && parseSlackCommand(normalized.text) !== undefined) {
+      await work();
+      return;
+    }
+    const key = `${event.channel}:${route.conversationSuffix}`;
+    const startsQueued = this.#messages.isBusy(key);
+    let waiting = true;
+    const queued = this.#messages.run(key, async () => {
+      waiting = false;
+      await work();
+    });
+    const acknowledge = async () => {
+      if (
+        startsQueued &&
+        event.user !== undefined &&
+        (await this.isUserAllowed(event.user)) &&
+        waiting
+      ) {
+        await this.#api
+          .postMessage({
+            channel: event.channel,
+            ...(route.replyThreadTs === undefined ? {} : { threadTs: route.replyThreadTs }),
+            text: "Queued behind earlier work…",
+          })
+          .catch((error: unknown) => {
+            this.#logger.debug("Slack queued acknowledgement failed", {
+              error: errorMessage(error),
+            });
+          });
+      }
+    };
+    await Promise.all([queued, acknowledge()]);
   }
 
-  private async processMessageEvent(event: SlackMessageEvent): Promise<void> {
+  private async processMessageEvent(
+    event: SlackMessageEvent,
+    normalized: NormalizedSlackMessage,
+  ): Promise<void> {
     const handler = this.#handler;
     const botUserId = this.#botUserId;
     if (handler === undefined || botUserId === undefined) return;
@@ -366,7 +401,6 @@ export class SlackChannel implements MessagingChannel {
       return;
     }
 
-    const normalized = normalizeSlackMessage(event, botUserId);
     const directory = join(this.#attachmentDirectory, crypto.randomUUID());
     const attachments: InboundAttachment[] = [];
     const failures: string[] = [];

@@ -31,6 +31,8 @@ test("hot-reloaded model and speed reach new and existing turns with partial-ans
   let routingStarted = deferred<void>();
   let count = 0;
   const routingRequests: AutoRoutingRequest[] = [];
+  const skillRequests: string[] = [];
+  let transcriptionFails = false;
   const notify = (notification: ServerNotification) => {
     for (const listener of listeners) listener(notification);
   };
@@ -82,10 +84,19 @@ test("hot-reloaded model and speed reach new and existing turns with partial-ans
     directory,
     directory,
     logger,
-    undefined,
+    {
+      transcribe: async () => {
+        if (transcriptionFails) throw new Error("Transcription unavailable");
+        return "Use $voice-skill to summarize this.";
+      },
+    },
     () => false,
     {
       effectiveSettings: () => runtime.settings(),
+      explicitSkillInputs: (text) => {
+        skillRequests.push(text);
+        return [];
+      },
       autoRouting: async (request) => {
         routingRequests.push(request);
         routingStarted.resolve();
@@ -232,6 +243,52 @@ test("hot-reloaded model and speed reach new and existing turns with partial-ans
     await stopped;
     expect(requests.filter((request) => request.method === "turn/start")).toHaveLength(5);
     expect(delivered.at(-1)).toBe("Stopped.");
+
+    // History remains context, while routing and skill selection use the current
+    // request, including either its voice transcript or the transcription notice.
+    pendingRouting = undefined;
+    const requestText = "Summarize this using $current-skill.";
+    const context = "Earlier message: debug this urgently using $old-skill.";
+    for (const mode of ["text", "voice", "failed-voice"] as const) {
+      transcriptionFails = mode === "failed-voice";
+      const addition =
+        mode === "text"
+          ? ""
+          : mode === "voice"
+            ? "\n\nVoice message transcript:\nUse $voice-skill to summarize this."
+            : "\n\nNote: voice transcription is unavailable, so the voice message is forwarded untranscribed as an audio file.";
+      const text = `${context}\n\n${requestText}`;
+      started = deferred<Turn>();
+      const contextual = service.runTurn(
+        "chat",
+        "slack",
+        text,
+        responder,
+        false,
+        mode === "text"
+          ? []
+          : [{ kind: "voice", path: join(directory, "voice.ogg"), description: "Voice message" }],
+        {},
+        false,
+        requestText,
+      );
+      const contextualTurn = await started.promise;
+      expect(skillRequests.at(-1)).toBe(requestText + addition);
+      expect(routingRequests.at(-1)).toMatchObject({
+        text: text + addition,
+        requestText: requestText + addition,
+      });
+      expect(
+        requests.filter((request) => request.method === "turn/start").at(-1)?.params,
+      ).toMatchObject({
+        input: [{ type: "text", text: expect.stringContaining(text + addition) }],
+      });
+      notify({
+        method: "turn/completed",
+        params: { threadId: "thread", turn: { ...contextualTurn, status: "completed" } },
+      });
+      await contextual;
+    }
   } finally {
     await runtime.stop();
     await rm(directory, { recursive: true, force: true });

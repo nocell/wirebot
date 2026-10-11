@@ -40,6 +40,12 @@ All notable changes to Wirebot are documented in this file.
 - Slack preserves message order during history retrieval; local fallback uses only
   the latest request and recognizes negated speed requests and Russian questions.
 - Toggling Auto preserves conflict detection for an unsaved web settings draft.
+- Delayed Auto toggle responses preserve newly saved settings. Slack follow-ups
+  retain queued acknowledgements, attachment captions cannot bypass their queue,
+  and historical skill mentions no longer activate skills on later requests.
+- Current voice transcripts remain separate from Slack history for routing and
+  skill selection. Ineligible classifiers skip history loading, and metadata lookup
+  failures no longer block otherwise runnable turns.
 
 ## [0.3.6] - 2026-09-29
 

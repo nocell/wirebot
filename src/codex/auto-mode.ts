@@ -204,13 +204,23 @@ export class AutoModeRouter {
       const fast = explicitSpeed(latest);
       if (fast !== undefined) decision = { ...decision, fast };
       try {
-        const history = await this.history(request.threadId, signal);
         const classifier = snapshot.capabilities.models.find(
           (candidate) => candidate.model === "gpt-6.1-sol",
         );
         if (
           classifier?.supportedReasoningEfforts.some((option) => option.reasoningEffort === "low")
         ) {
+          const account = await withAbort(
+            () =>
+              this.#rpc.request<GetAccountResponse>({
+                method: "account/read",
+                params: { refreshToken: false },
+              }),
+            signal,
+          );
+          if (account.account?.type !== "chatgpt")
+            throw new Error("Auto classification requires Codex subscription sign-in");
+          const history = await this.history(request.threadId, signal);
           decision = await this.classify(request, classifier, history, signal);
         }
       } catch (error) {
@@ -344,16 +354,6 @@ export class AutoModeRouter {
     const unsubscribeExit = this.#rpc.onExit((exit) => result.reject(exit.error));
     try {
       signal.throwIfAborted();
-      const account = await withAbort(
-        () =>
-          this.#rpc.request<GetAccountResponse>({
-            method: "account/read",
-            params: { refreshToken: false },
-          }),
-        signal,
-      );
-      if (account.account?.type !== "chatgpt")
-        throw new Error("Auto classification requires Codex subscription sign-in");
       const response = await withAbort(
         () =>
           this.#rpc.request<ConfigReadResponse>({

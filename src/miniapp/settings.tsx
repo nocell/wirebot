@@ -404,7 +404,7 @@ function WirebotSettingToggle({
       });
       // Keep an existing draft's config values/version so concurrent config edits
       // still conflict on Save; this request only changed Wirebot settings.
-      data.setSnapshot({ ...snapshot, wirebot: loaded.wirebot });
+      data.setSnapshot((current) => ({ ...(current ?? snapshot), wirebot: loaded.wirebot }));
       notifyHaptic("success");
     } catch (changeError) {
       setError(messageOf(changeError));

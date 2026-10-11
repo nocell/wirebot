@@ -145,9 +145,18 @@ export async function runWirebot(): Promise<void> {
       {
         effectiveSettings: () => liveRuntime?.settings() ?? {},
         autoRouting: (request) => autoRouter.route(request),
-        defaultReasoningEffort: async (model) =>
-          resolveSelectedModel(model, (await configService.read()).capabilities.models)
-            ?.defaultReasoningEffort,
+        defaultReasoningEffort: async (model) => {
+          try {
+            return resolveSelectedModel(model, (await configService.read()).capabilities.models)
+              ?.defaultReasoningEffort;
+          } catch (error) {
+            logger.warn("Could not look up the default reasoning effort", {
+              model,
+              error: errorMessage(error),
+            });
+            return undefined;
+          }
+        },
         explicitSkillInputs: (text) => liveRuntime?.skillInputs(text) ?? [],
         ...(config.container ? { environmentContext: createContainerEnvironmentContext() } : {}),
         ...(chatgptAuth === undefined

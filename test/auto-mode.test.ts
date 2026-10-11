@@ -382,10 +382,24 @@ test("invalid classifier output and API-key accounts fall back without API billi
     effort: "low",
     serviceTierForTurn: "ultrafast",
   });
-  expect(f.calls.some((call) => call.method === "turn/start")).toBe(false);
+  expect(f.calls.map((call) => call.method)).toEqual(["account/read"]);
   f.state.enabled = false;
   f.calls.length = 0;
   expect(await f.route("Debug this")).toEqual({});
+  expect(f.calls).toHaveLength(0);
+});
+
+test("unsupported classifier capabilities use local routing without reading history", async () => {
+  const f = await fixture();
+  f.state.models = [
+    {
+      ...model,
+      supportedReasoningEfforts: model.supportedReasoningEfforts.filter(
+        (option) => option.reasoningEffort !== "low",
+      ),
+    },
+  ];
+  expect(await f.route("Debug this")).toEqual({ effort: "ultra", serviceTierForTurn: "default" });
   expect(f.calls).toHaveLength(0);
 });
 

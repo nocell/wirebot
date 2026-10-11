@@ -18,6 +18,8 @@ catalog entry, including the effective model of a resumed model-specific schedul
 Auto uses `serviceTierForTurn` so its speed choice does not become a saved thread
 preference. Manual turns and scheduled runs explicitly restore the effective
 model's default effort when the configured effort is unset.
+If model metadata cannot be read, Wirebot logs the lookup failure and keeps the
+loaded settings so otherwise runnable foreground and scheduled turns can continue.
 
 ## Codex 0.162.1 protocol evidence
 

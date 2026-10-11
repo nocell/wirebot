@@ -31,12 +31,17 @@ afterEach(async () => {
 });
 
 test("Slack preserves message order across slow history while stop bypasses the turn queue", async () => {
-  spyOn(WebClient.prototype, "apiCall").mockImplementation(async () => ({
-    ok: true,
-    user_id: "BOT",
-    team_id: "TEAM",
-    user: { real_name: "User" },
-  }));
+  const apiCalls: { method: string; options: unknown }[] = [];
+  spyOn(WebClient.prototype, "apiCall").mockImplementation(async (method, options) => {
+    apiCalls.push({ method, options });
+    return {
+      ok: true,
+      ts: "5.000",
+      user_id: "BOT",
+      team_id: "TEAM",
+      user: { real_name: "User" },
+    };
+  });
   spyOn(SocketModeClient.prototype, "start").mockImplementation(async () => {});
   const channel = new SlackChannel(
     {
@@ -84,17 +89,94 @@ test("Slack preserves message order across slow history while stop bypasses the 
       ts: "3.000",
       text: "<@BOT> Correction B",
     });
+    const unauthorized = internal.handleMessageEvent({
+      ...event,
+      ts: "3.500",
+      user: "outsider",
+    });
     await internal.handleMessageEvent({ ...event, ts: "4.000", text: "<@BOT> /stop" });
     expect(received.map((message) => message.id)).toEqual(["4.000"]);
+    expect(apiCalls.filter((call) => call.method === "chat.postMessage")).toEqual([
+      {
+        method: "chat.postMessage",
+        options: expect.objectContaining({
+          channel: "C",
+          thread_ts: "1.000",
+          text: "Queued behind earlier work…",
+        }),
+      },
+    ]);
     historyReady.resolve();
     while (received.length < 2) await Bun.sleep(1);
     expect(received.map((message) => message.id)).toEqual(["4.000", "2.000"]);
     turnReady.resolve();
-    await Promise.all([first, second]);
+    await Promise.all([first, second, unauthorized]);
     expect(received.map((message) => message.id)).toEqual(["4.000", "2.000", "3.000"]);
     expect(received.at(-1)?.requestText).toBe("Correction B");
   } finally {
     historyReady.resolve();
+    turnReady.resolve();
+    await channel.stop();
+  }
+});
+
+test("Slack attachment captions cannot bypass earlier queued messages", async () => {
+  spyOn(WebClient.prototype, "apiCall").mockImplementation(async () => ({
+    ok: true,
+    ts: "5.000",
+    user_id: "BOT",
+    team_id: "TEAM",
+  }));
+  spyOn(SocketModeClient.prototype, "start").mockImplementation(async () => {});
+  const channel = new SlackChannel(
+    {
+      botToken: "xoxb-test",
+      appToken: "xapp-test",
+      allowedUserIds: new Set(["user"]),
+      allowAllWorkspaceMembers: false,
+    },
+    "/tmp/unused",
+    logger,
+  );
+  const internal = channel as unknown as {
+    handleMessageEvent(event: SlackMessageEvent): Promise<void>;
+    processMessageEvent(event: SlackMessageEvent): Promise<void>;
+  };
+  const turnStarted = deferred<void>();
+  const turnReady = deferred<void>();
+  const processed: string[] = [];
+  spyOn(internal, "processMessageEvent").mockImplementation(async (event) => {
+    processed.push(event.ts);
+    if (event.ts === "1.000") {
+      turnStarted.resolve();
+      await turnReady.promise;
+    }
+  });
+  try {
+    await channel.start(async () => {});
+    const event: SlackMessageEvent = {
+      type: "message",
+      channel: "D",
+      channel_type: "im",
+      ts: "1.000",
+      user: "user",
+      text: "Request A",
+    };
+    const first = internal.handleMessageEvent(event);
+    await turnStarted.promise;
+    const second = internal.handleMessageEvent({ ...event, ts: "2.000", text: "Request B" });
+    const third = internal.handleMessageEvent({
+      ...event,
+      ts: "3.000",
+      text: "new",
+      files: [{ id: "F", name: "replacement.txt" }],
+    });
+    await internal.handleMessageEvent({ ...event, ts: "4.000", text: "/stop" });
+    expect(processed).toEqual(["1.000", "4.000"]);
+    turnReady.resolve();
+    await Promise.all([first, second, third]);
+    expect(processed).toEqual(["1.000", "4.000", "2.000", "3.000"]);
+  } finally {
     turnReady.resolve();
     await channel.stop();
   }
