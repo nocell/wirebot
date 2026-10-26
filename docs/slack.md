@@ -170,6 +170,32 @@ variables set, Wirebot runs Slack-only with the same web app. Restart Wirebot an
 - **Sign-in**: if Codex is not signed in yet, `/wirebot login` in the bot DM
   returns the ChatGPT device-code link, exactly like `/login` on Telegram.
 
+## Let Codex read Slack history (optional)
+
+By default Codex never sees a Slack token: Wirebot keeps `SLACK_BOT_TOKEN` and
+`SLACK_APP_TOKEN` out of its environment, and only the bridge itself reads a
+thread when the bot is first mentioned there or after `new`. To let Codex read
+Slack on request — "summarize this thread", a pasted message link, "what did
+#ops discuss this week" — set `WIREBOT_CODEX_SLACK_TOKEN`:
+
+- Either the same `xoxb-` bot token, or the bot token of a second Slack app
+  that has only read scopes. A separate app is safer: Codex can then neither
+  post as the bot nor open its Socket Mode connection.
+- Read scopes: `channels:history`, `groups:history`, `im:history`,
+  `mpim:history`, `channels:read`, `groups:read`, `mpim:read`, `im:read`,
+  `users:read`. Reinstall the app after adding scopes.
+
+Slack turns then carry the channel, thread and requesting user as context, and
+the bundled `slack-history` skill reads through a helper that only calls read
+methods. The token reads what the bot is a member of — invite it where it
+should read. Bot tokens cannot use Slack search.
+
+Anyone allowed to talk to Wirebot can ask Codex to read any conversation the
+token can reach, including private channels the bot is in and other people's
+DMs with the bot. The skill tells Codex not to read other people's DMs, but that
+is guidance, not enforcement; with `SLACK_ALLOWED_USER_IDS=*` prefer a separate
+read-only app and invite it only where reading is appropriate.
+
 ## Notes and limits
 
 - **Authorization**: messages, commands, and button clicks from users outside

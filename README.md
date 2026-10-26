@@ -146,6 +146,7 @@ and reverse-proxy that origin to the container's port 8787 (publish it in your c
 | `CODEX_API_KEY`             | unset                      | OpenAI API key for headless Codex auth   |
 | `HOST` / `PORT`             | `0.0.0.0` / `8787`         | Mini App listener (container default)    |
 | `LOG_LEVEL`                 | `info`                     | `debug`, `info`, `warn`, or `error`      |
+| `WIREBOT_CODEX_SLACK_TOKEN` | unset                      | Slack token Codex may read history with  |
 
 ## Authenticate Codex
 

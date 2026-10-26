@@ -4,6 +4,7 @@ import { AutomationStore } from "./automations/store.js";
 import { withWirebotSettings } from "./channels/config-fields.js";
 import { DiscordChannel } from "./channels/discord/channel.js";
 import { SlackChannel } from "./channels/slack/channel.js";
+import { slackCodexContext } from "./channels/slack/codex-context.js";
 import { TelegramChannel } from "./channels/telegram/channel.js";
 import { AutoModeRouter } from "./codex/auto-mode.js";
 import { CodexConfigService } from "./codex/config-service.js";
@@ -159,6 +160,7 @@ export async function runWirebot(): Promise<void> {
         },
         explicitSkillInputs: (text) => liveRuntime?.skillInputs(text) ?? [],
         ...(config.container ? { environmentContext: createContainerEnvironmentContext() } : {}),
+        ...(config.codexSlackAccess ? { conversationContext: slackCodexContext } : {}),
         ...(chatgptAuth === undefined
           ? {}
           : {

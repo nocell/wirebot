@@ -4,6 +4,18 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-26
+
+### Added
+
+- Optional Slack read access for Codex. Set `WIREBOT_CODEX_SLACK_TOKEN` (the bot token itself
+  or a separate read-only app's token) and Codex receives it in its environment, Slack turns
+  carry the current channel, thread and requesting user as context, and the bundled
+  `slack-history` skill reads threads, pasted message links, bounded channel history and the
+  bot's channel list through a read-only helper (`conversations.replies`/`history`,
+  `users.conversations`, `users.info` only). `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` stay hidden
+  from Codex as before.
+
 ## [0.4.0] - 2026-10-11
 
 ### Added

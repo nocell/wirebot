@@ -162,6 +162,11 @@ export interface CodexServiceProviders {
   readonly explicitSkillInputs?: ExplicitSkillInputProvider;
   /** Static deployment-environment context added to every turn. */
   readonly environmentContext?: ApplicationContext;
+  /** Per-turn, connector-derived context (for example where a Slack turn came from). */
+  readonly conversationContext?: (
+    connector: string,
+    invocation: CodexInvocationContext,
+  ) => ApplicationContext | undefined;
   readonly externalAuthTokens?: (
     request: ChatgptAuthTokensRefreshParams,
   ) => Promise<ChatgptAuthTokensRefreshResponse>;
@@ -190,6 +195,7 @@ export class CodexService {
   readonly #defaultReasoningEffort: CodexServiceProviders["defaultReasoningEffort"];
   readonly #explicitSkillInputs: ExplicitSkillInputProvider;
   readonly #environmentContext: ApplicationContext | undefined;
+  readonly #conversationContext: CodexServiceProviders["conversationContext"];
   readonly #externalAuthTokens: CodexServiceProviders["externalAuthTokens"];
   #pauseGate: Deferred<void> | undefined;
   #idleGate: Deferred<void> | undefined;
@@ -225,6 +231,7 @@ export class CodexService {
     this.#defaultReasoningEffort = providers.defaultReasoningEffort;
     this.#explicitSkillInputs = providers.explicitSkillInputs ?? (() => []);
     this.#environmentContext = providers.environmentContext;
+    this.#conversationContext = providers.conversationContext;
     this.#externalAuthTokens = providers.externalAuthTokens;
     rpc.onNotification((notification) => this.handleNotification(notification));
     rpc.onExit((exit) => this.handleTransportExit(exit.error));
@@ -904,6 +911,7 @@ export class CodexService {
     return {
       ...(this.#remoteClientContextEnabled() ? createRemoteClientContext(connector) : {}),
       ...(this.#environmentContext ?? {}),
+      ...(this.#conversationContext?.(connector, invocation) ?? {}),
       ...(invocation.additionalContext ?? {}),
     };
   }

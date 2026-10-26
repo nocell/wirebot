@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slack History"
+  short_description: "Read Slack threads, channel history, and linked messages"
+  default_prompt: "Use $slack-history to summarize this Slack thread."

@@ -31,6 +31,12 @@ const envSchema = z.object({
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  /**
+   * Optional Slack token handed to Codex (as this same variable) so it can read
+   * Slack history on request. Unlike SLACK_BOT_TOKEN it is deliberately NOT
+   * bridge-only; it may be the bot token itself or a separate read-only app's.
+   */
+  WIREBOT_CODEX_SLACK_TOKEN: z.string().startsWith("xox").optional(),
 });
 
 /**
@@ -103,6 +109,8 @@ export interface AppConfig {
   readonly host: string;
   readonly port: number;
   readonly logLevel: LogLevel;
+  /** Codex received WIREBOT_CODEX_SLACK_TOKEN and may read Slack history. */
+  readonly codexSlackAccess: boolean;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -142,6 +150,7 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     host: parsed.HOST,
     port: parsed.PORT,
     logLevel: parsed.LOG_LEVEL,
+    codexSlackAccess: parsed.WIREBOT_CODEX_SLACK_TOKEN !== undefined,
   };
 }
 
