@@ -1,5 +1,5 @@
 {
-  "codexVersion": "0.166.0",
+  "codexVersion": "0.169.1",
   "methods": {
     "clientRequests": [
       "account/gatewayOAuth/cancel",
@@ -11,6 +11,7 @@
       "account/rateLimitResetCredit/consume",
       "account/rateLimits/read",
       "account/read",
+      "account/securitySetup/read",
       "account/sendAddCreditsNudgeEmail",
       "account/usage/read",
       "account/workspaceMessages/read",
@@ -58,6 +59,8 @@
       "mcpServerStatus/list",
       "model/list",
       "modelProvider/capabilities/read",
+      "modelProvider/config/write",
+      "modelProvider/list",
       "permissionProfile/list",
       "plugin/install",
       "plugin/installed",
@@ -202,6 +205,7 @@
       "thread/realtime/transcript/delta",
       "thread/realtime/transcript/done",
       "thread/reverted",
+      "thread/section/changed",
       "thread/settings/updated",
       "thread/started",
       "thread/status/changed",

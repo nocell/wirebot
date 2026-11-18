@@ -4,6 +4,18 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-18
+
+### Changed
+
+- Merged upstream Wirebot 0.4.0: running turns accept steered follow-ups, Slack and Discord
+  post the final answer as a new message, and the project requires Bun 1.4.4.
+- Updated the bundled Codex CLI from 0.166.0 to 0.169.1 and regenerated the app-server
+  protocol bindings. The model catalog now offers GPT-6.2 Astra and GPT-6.2 Sol, which
+  older Codex builds do not list.
+- Auto effort & speed classifies with GPT-6.2 Sol / Low / Fast and falls back to GPT-6.1 Sol
+  when the account's catalog does not offer GPT-6.2 Sol.
+
 ## [upstream 0.4.0] - 2026-10-30
 
 Upstream Wirebot 0.4.0, merged into this fork in 0.4.2.

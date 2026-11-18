@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AutoModeRouter,
+  classifierModel,
   explicitSpeed,
   fallbackDecision,
   settingsForDecision,
@@ -401,6 +402,21 @@ test("unsupported classifier capabilities use local routing without reading hist
   ];
   expect(await f.route("Debug this")).toEqual({ effort: "ultra", serviceTierForTurn: "default" });
   expect(f.calls).toHaveLength(0);
+});
+
+test("the classifier prefers GPT-6.2 Sol and falls back to GPT-6.1 Sol", () => {
+  const sol61 = required(modelCatalog.find((candidate) => candidate.model === "gpt-6.1-sol"));
+  const sol62: ModelCapability = { ...sol61, model: "gpt-6.2-sol", displayName: "GPT-6.2 Sol" };
+  const sol62WithoutLow: ModelCapability = {
+    ...sol62,
+    supportedReasoningEfforts: sol62.supportedReasoningEfforts.filter(
+      (option) => option.reasoningEffort !== "low",
+    ),
+  };
+  expect(classifierModel([sol61, sol62])?.model).toBe("gpt-6.2-sol");
+  expect(classifierModel([sol61])?.model).toBe("gpt-6.1-sol");
+  expect(classifierModel([sol62WithoutLow, sol61])?.model).toBe("gpt-6.1-sol");
+  expect(classifierModel([sol62WithoutLow])).toBeUndefined();
 });
 
 test("classifier timeout interrupts and unloads its ephemeral thread", async () => {

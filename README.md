@@ -252,8 +252,8 @@ The Settings tab opens as a summary: usage limits, the Codex configuration pages
 
 Choices come from the running app-server and active configuration layers instead of a handwritten catalog. Codex itself is the validator: a save is a version-checked `config/batchWrite`, so all changes either pass Codex validation and land together or leave `config.toml` untouched. The app-server runs with `--strict-config`, so unknown configuration keys fail loudly.
 
-In **Settings → Model**, choose an available model (including GPT-6.1 Sol, GPT-6 Astra,
-GPT-6 Sol, and GPT-6 Luna). **Auto effort & speed** is on by default and reassesses
+In **Settings → Model**, choose an available model (including GPT-6.2 Astra, GPT-6.2 Sol,
+GPT-6.1 Sol, and GPT-6 Luna). **Auto effort & speed** is on by default and reassesses
 each message using the full current Codex conversation, including previous turns.
 Slack mentions also include the entire Slack thread, including intervening human messages.
 In DMs, `new` starts a fresh context; messages before it are not replayed.
@@ -266,8 +266,8 @@ In DMs, `new` starts a fresh context; messages before it are not replayed.
 | Deep research / debugging | Ultra (or the model's highest supported level) | Standard |
 | Explicit request to work quickly | Appropriate to the task | Ultrafast, then Fast, then Standard, according to availability |
 
-Routing uses a separate, ephemeral **GPT-6.1 Sol / Low / Fast** turn through the
-existing Codex subscription sign-in, with host capabilities, tools, and MCP servers disabled.
+Routing uses a separate, ephemeral **GPT-6.2 Sol / Low / Fast** turn (GPT-6.1 Sol when the
+catalog lacks GPT-6.2 Sol) through the existing Codex subscription sign-in, with host capabilities, tools, and MCP servers disabled.
 It consumes subscription usage. If the classifier is unavailable, times out, or fails,
 Wirebot uses local routing; a simple “continue” can reuse the last decision. The selected
 answering model stays unchanged. Scheduled runs keep their configured settings.
