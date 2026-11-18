@@ -4,6 +4,44 @@ All notable changes to Wirebot are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-18
+
+### Changed
+
+- Merged upstream Wirebot 0.4.0: running turns accept steered follow-ups, Slack and Discord
+  post the final answer as a new message, and the project requires Bun 1.4.4.
+- Updated the bundled Codex CLI from 0.166.0 to 0.169.1 and regenerated the app-server
+  protocol bindings. The model catalog now offers GPT-6.2 Astra and GPT-6.2 Sol, which
+  older Codex builds do not list.
+- Auto effort & speed classifies with GPT-6.2 Sol / Low / Fast and falls back to GPT-6.1 Sol
+  when the account's catalog does not offer GPT-6.2 Sol.
+
+## [upstream 0.4.0] - 2026-10-30
+
+Upstream Wirebot 0.4.0, merged into this fork in 0.4.2.
+
+### Added
+
+- A message sent while Codex is working on your own turn now joins that turn immediately, marked
+  with 👀, instead of waiting behind it. Messages from other people in a group, replies to a
+  scheduled run, and messages sent after `/stop` still queue.
+- Failed turns suggest the command that can fix the problem, such as `/config` when a model is not
+  found or `/compact` when the context window is full.
+- The Usage card and desktop sidebar say when the account isn't allowed to use its included usage.
+- `/status` and sign-in messages name the selected ChatGPT workspace.
+
+### Changed
+
+- Updated the bundled Codex CLI from 0.159.0 to 0.166.0 and regenerated the app-server protocol
+  bindings. Replies include Codex's new partial answers ahead of the final answer instead of
+  dropping them, and the account summary recognizes Google Cloud authentication.
+- Slack and Discord post the final answer as a new message and then delete the progress message,
+  instead of editing the answer into it. Messengers don't notify on edits, so the answer now
+  notifies like any other message, and it lands below any follow-ups sent during the turn.
+- The project now requires Bun 1.4.4 across local development, CI, release builds, and Docker.
+- Slack Socket Mode runs on the unmodified `@slack/socket-mode` package. Bun 1.4.4's undici now
+  supports WebSocket pings, so the `undici-real` alias and the package patch are gone.
+
 ## [0.4.1] - 2026-10-26
 
 ### Added

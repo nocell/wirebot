@@ -55,6 +55,19 @@ const requestedEffort: Record<RoutingDecision["task"], ReasoningEffort> = {
   bug_research: "ultra",
 };
 
+/** Preferred first; older entries cover accounts and Codex builds without the newest model. */
+const classifierModels = ["gpt-6.2-sol", "gpt-6.1-sol"] as const;
+
+/** The first preferred classifier the account's catalog offers with Low effort. */
+export function classifierModel(models: readonly ModelCapability[]): ModelCapability | undefined {
+  for (const id of classifierModels) {
+    const candidate = models.find((model) => model.model === id);
+    if (candidate?.supportedReasoningEfforts.some((option) => option.reasoningEffort === "low"))
+      return candidate;
+  }
+  return undefined;
+}
+
 /** Resolve against the live account catalog each time, including after entitlement changes. */
 export function settingsForDecision(
   decision: RoutingDecision,
@@ -204,12 +217,8 @@ export class AutoModeRouter {
       const fast = explicitSpeed(latest);
       if (fast !== undefined) decision = { ...decision, fast };
       try {
-        const classifier = snapshot.capabilities.models.find(
-          (candidate) => candidate.model === "gpt-6.1-sol",
-        );
-        if (
-          classifier?.supportedReasoningEfforts.some((option) => option.reasoningEffort === "low")
-        ) {
+        const classifier = classifierModel(snapshot.capabilities.models);
+        if (classifier !== undefined) {
           const account = await withAbort(
             () =>
               this.#rpc.request<GetAccountResponse>({

@@ -5,8 +5,8 @@ history and the latest request. Slack channel messages also include the complete
 Slack thread; local fallback rules use only the latest message. DMs use the active
 Codex thread and start fresh after `new`.
 
-The classifier uses the user's Codex ChatGPT subscription with GPT-6.1 Sol, Low
-effort and Fast when advertised by the model catalog. It has a separate ephemeral
+The classifier uses the user's Codex ChatGPT subscription with GPT-6.2 Sol (GPT-6.1 Sol
+when the catalog lacks it), Low effort and Fast when advertised by the model catalog. It has a separate ephemeral
 thread, empty workspace, no tools or MCP servers, and a 20-second deadline covering
 configuration, history and startup as well as inference. Cancellation releases
 pending waits and cleans up late thread/turn startup responses. API-key accounts

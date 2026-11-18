@@ -161,6 +161,10 @@ The two are mutually exclusive.
 
 Voice messages use that same ChatGPT subscription. Wirebot briefly shows a **Transcribing…** thinking block, sends the OGG recording to ChatGPT's Codex dictation service, and then starts the normal Codex turn with both the transcript and original attachment. The pinned, checksum-verified browser-compatible HTTP transport is bundled in the image.
 
+## Follow-up messages
+
+A message you send while Codex is working on your own turn joins that turn straight away, and Wirebot marks it with 👀. Codex cancels the response it was writing and carries on with your follow-up, and you get one reply covering both. Everything else waits in the queue and starts its own turn: messages from someone else in a group, replies to a scheduled run, messages sent after `/stop`, and anything behind a message that is already queued.
+
 ## Telegram commands
 
 | Command      | Effect                                                                                           |
@@ -248,8 +252,8 @@ The Settings tab opens as a summary: usage limits, the Codex configuration pages
 
 Choices come from the running app-server and active configuration layers instead of a handwritten catalog. Codex itself is the validator: a save is a version-checked `config/batchWrite`, so all changes either pass Codex validation and land together or leave `config.toml` untouched. The app-server runs with `--strict-config`, so unknown configuration keys fail loudly.
 
-In **Settings → Model**, choose an available model (including GPT-6.1 Sol, GPT-6 Astra,
-GPT-6 Sol, and GPT-6 Luna). **Auto effort & speed** is on by default and reassesses
+In **Settings → Model**, choose an available model (including GPT-6.2 Astra, GPT-6.2 Sol,
+GPT-6.1 Sol, and GPT-6 Luna). **Auto effort & speed** is on by default and reassesses
 each message using the full current Codex conversation, including previous turns.
 Slack mentions also include the entire Slack thread, including intervening human messages.
 In DMs, `new` starts a fresh context; messages before it are not replayed.
@@ -262,8 +266,8 @@ In DMs, `new` starts a fresh context; messages before it are not replayed.
 | Deep research / debugging | Ultra (or the model's highest supported level) | Standard |
 | Explicit request to work quickly | Appropriate to the task | Ultrafast, then Fast, then Standard, according to availability |
 
-Routing uses a separate, ephemeral **GPT-6.1 Sol / Low / Fast** turn through the
-existing Codex subscription sign-in, with host capabilities, tools, and MCP servers disabled.
+Routing uses a separate, ephemeral **GPT-6.2 Sol / Low / Fast** turn (GPT-6.1 Sol when the
+catalog lacks GPT-6.2 Sol) through the existing Codex subscription sign-in, with host capabilities, tools, and MCP servers disabled.
 It consumes subscription usage. If the classifier is unavailable, times out, or fails,
 Wirebot uses local routing; a simple “continue” can reuse the last decision. The selected
 answering model stays unchanged. Scheduled runs keep their configured settings.
@@ -293,15 +297,15 @@ If the app-server exits on its own — for example the kernel OOM-killer or a st
 ### Message reactions
 
 Wirebot automatically connects a private localhost MCP server using MCP 2026-07-28.
-Its `react_to_last_message(reaction)` tool targets the message the active turn is answering.
+Its `react_to_last_message(reaction)` tool targets the latest message the active turn is answering.
 Routing uses Codex's thread/turn metadata; no message identifiers are added to prompts.
 The default messenger context encourages Codex to react when it fits the conversation.
-Empty answers send no reply, so a reaction can stand on its own; Slack and Discord progress
-messages are deleted when there is no final text.
+Empty answers send no reply, so a reaction can stand on its own. Slack and Discord delete their
+progress message when the turn ends and post any answer as a new message.
 Wirebot preapproves all tools from its own MCP server. Other MCP tool approvals use
 the messenger's Allow once, Allow for session (when supported), and Deny buttons.
-Queued messages cannot retarget a running turn. Scheduled runs and calls after a turn
-ends have no reaction target.
+A follow-up that joins the turn becomes the new target; queued messages do not. Scheduled
+runs and calls after a turn ends have no reaction target.
 
 Reactions add the bot's emoji on Slack and Discord, and replace its single reaction on Telegram.
 Unsupported emoji and missing permissions return a tool error without substituting another emoji.
