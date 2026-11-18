@@ -178,7 +178,9 @@ test("hot-reloaded model and speed reach new and existing turns with partial-ans
       { model: "gpt-6-luna", serviceTier: null, effort: "max" },
     ]);
     expect(streamed).toContain("An interim answer");
-    expect(delivered).toEqual(["The final answer", "The final answer"]);
+    // Since upstream 0.4.0, replies keep partial answers ahead of the final answer.
+    const reply = "An interim answer\n\nThe final answer";
+    expect(delivered).toEqual([reply, reply]);
 
     // Auto only overrides effort/speed; the user's selected model still reaches Codex.
     autoSettings = { effort: "max", serviceTierForTurn: "priority" };

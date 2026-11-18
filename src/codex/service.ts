@@ -32,6 +32,7 @@ import type { ToolRequestUserInputAnswer } from "../generated/codex/v2/ToolReque
 import type { ToolRequestUserInputResponse } from "../generated/codex/v2/ToolRequestUserInputResponse.js";
 import type { TurnStartParams } from "../generated/codex/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "../generated/codex/v2/TurnStartResponse.js";
+import type { TurnSteerResponse } from "../generated/codex/v2/TurnSteerResponse.js";
 import type { UserInput } from "../generated/codex/v2/UserInput.js";
 import { type Deferred, deferred, KeyedSerialQueue, withAbort } from "../shared/async.js";
 import { BridgeError, errorMessage } from "../shared/errors.js";
@@ -44,11 +45,13 @@ import {
   isCodexTransportUnavailable,
 } from "./rpc.js";
 import {
+  dropOpenAnswers,
   type FinalizedTurn,
   silentStream,
   ThreadSession,
   type ThreadSessionContext,
   type TurnPresentation,
+  type TurnView,
 } from "./thread-session.js";
 
 export interface CodexInvocationContext {
@@ -113,6 +116,12 @@ interface StartCompactionRequest extends TurnPresentation {
 }
 
 type LoginCompletedListener = (notification: AccountLoginCompletedNotification) => void;
+
+/** Turn text, plus the latest request alone when the text also replays conversation history. */
+interface PreparedText {
+  readonly text: string;
+  readonly requestText: string | undefined;
+}
 
 type CodexThreadSettings = Readonly<
   Pick<
@@ -320,9 +329,14 @@ export class CodexService {
     const shouldTranscribe = voiceAttachments.length > 0 && this.#voiceTranscriber !== undefined;
     this.incrementForegroundWaiting(conversationKey);
     let dequeued = false;
+    const markDequeued = (): void => {
+      if (dequeued) return;
+      dequeued = true;
+      this.decrementForegroundWaiting(conversationKey);
+    };
     try {
       const startsQueued = this.#queue.isBusy(conversationKey);
-      let preparedText: Promise<{ text: string; requestText: string | undefined }> | undefined;
+      let preparedText: Promise<PreparedText> | undefined;
       if (shouldTranscribe) {
         await stream.start({ summary: "Transcribing…", actions: [], plan: [] });
         preparedText = this.transcribeVoiceMessages(
@@ -335,13 +349,37 @@ export class CodexService {
           return prepared;
         });
         void preparedText.catch(() => undefined);
-      } else if (startsQueued) {
-        await stream.start({ summary: "Queued behind earlier work…", actions: [], plan: [] });
       }
 
+      // A follow-up tries to join the running turn while holding its place in
+      // the queue, so later messages stay behind it either way. A steered
+      // message's slot still waits for the turn: its attachments must outlive
+      // the turn that reads them.
+      const steering = (async (): Promise<boolean> => {
+        const steered =
+          startsQueued &&
+          !ephemeral &&
+          (await this.steerRunningTurn(
+            conversationKey,
+            connector,
+            preparedText ?? { text, requestText },
+            responder,
+            attachments,
+            invocation,
+          ));
+        if (steered) {
+          markDequeued();
+          await stream.complete("");
+        } else if (startsQueued && !shouldTranscribe) {
+          await stream.start({ summary: "Queued behind earlier work…", actions: [], plan: [] });
+        }
+        return steered;
+      })();
+      void steering.catch(() => undefined);
+
       await this.#queue.run(conversationKey, async () => {
-        dequeued = true;
-        this.decrementForegroundWaiting(conversationKey);
+        if (await steering) return;
+        markDequeued();
         await this.enterJob();
         let started = false;
         try {
@@ -440,8 +478,80 @@ export class CodexService {
         }
       });
     } finally {
-      if (!dequeued) this.decrementForegroundWaiting(conversationKey);
+      markDequeued();
     }
+  }
+
+  /**
+   * Add a follow-up to the conversation's running turn. Anything that rules
+   * steering out, including Codex refusing it because the turn just ended,
+   * leaves the message to start its own turn from the queue.
+   */
+  private async steerRunningTurn(
+    conversationKey: string,
+    connector: string,
+    text: PreparedText | Promise<PreparedText>,
+    responder: MessageResponder,
+    attachments: readonly InboundAttachment[],
+    invocation: CodexInvocationContext,
+  ): Promise<boolean> {
+    if (this.steerableTurn(conversationKey, invocation) === undefined) return false;
+    const prepared = await text;
+    // Like a new turn, only the latest request may activate skills, not replayed history.
+    const skillInputs = await this.#explicitSkillInputs(prepared.requestText ?? prepared.text);
+    const target = this.steerableTurn(conversationKey, invocation);
+    if (target === undefined) return false;
+    const { session, view } = target;
+    session.adoptPresenter(conversationKey, connector, responder, invocation);
+    try {
+      await this.#rpc.request<TurnSteerResponse>({
+        method: "turn/steer",
+        params: {
+          threadId: session.threadId,
+          expectedTurnId: view.turnId,
+          clientUserMessageId: crypto.randomUUID(),
+          input: [...createTurnInput(prepared.text, connector, attachments), ...skillInputs],
+        },
+      });
+    } catch (error) {
+      this.#logger.debug("Codex did not accept a follow-up into the running turn", {
+        conversationKey,
+        turnId: view.turnId,
+        error: errorMessage(error),
+      });
+      return false;
+    }
+    view.invocation = invocation;
+    // The steer cancels the streaming response, and it may never get a replacement if a stop follows.
+    dropOpenAnswers(view);
+    void invocation.reactToMessage?.("👀").catch((error: unknown) => {
+      this.#logger.debug("Could not acknowledge a steered message", {
+        conversationKey,
+        error: errorMessage(error),
+      });
+    });
+    return true;
+  }
+
+  /**
+   * The turn a follow-up may join: the sender's own, on the conversation's
+   * current thread, with no earlier message waiting and no stop or restart
+   * underway. Reply context for scheduled runs only travels with `turn/start`.
+   */
+  private steerableTurn(
+    conversationKey: string,
+    invocation: CodexInvocationContext,
+  ): { readonly session: ThreadSession; readonly view: TurnView } | undefined {
+    const { owner } = invocation;
+    if (owner === undefined || invocation.additionalContext !== undefined) return undefined;
+    if (this.#pauseGate !== undefined) return undefined;
+    if (this.#foregroundWaiting.get(conversationKey) !== 1) return undefined;
+    const session = this.#conversationSessions.get(conversationKey);
+    if (session === undefined || this.#conversations.get(conversationKey) !== session.threadId) {
+      return undefined;
+    }
+    const view = session.steerableView(owner);
+    return view === undefined ? undefined : { session, view };
   }
 
   public async runScheduledTurn(request: ScheduledTurnRequest): Promise<CodexTurnResult> {
@@ -593,7 +703,7 @@ export class CodexService {
     syntheticText: boolean,
     attachments: readonly InboundAttachment[],
     requestText?: string,
-  ): Promise<{ text: string; requestText: string | undefined }> {
+  ): Promise<PreparedText> {
     const transcriber = this.#voiceTranscriber;
     if (transcriber === undefined) return { text, requestText };
     let transcripts: readonly string[];
